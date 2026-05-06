@@ -35,3 +35,22 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# project specific
+/node_modules
+/.next/
+/.kiro/
+/tmp/
+/test-output/
+
+# logs
+*.log
+*.log*
+*_log.txt
+cols.log
+schema_check.log
+
+# configuration and sensitive
+.env*.local
+mcp_config.json
+.gemini/

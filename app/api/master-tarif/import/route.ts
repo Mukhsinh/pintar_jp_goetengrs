@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
             try {
                 const code = row['Kode']?.toString().trim()
                 const name = row['Nama']?.toString().trim()
+                const serviceType = row['Jenis Layanan']?.toString().trim()
                 const typeRaw = row['Tipe (Aktivitas/Indeks)']?.toString().trim().toLowerCase()
                 const amount = parseFloat(row['Nilai/Tarif']?.toString() || '0')
                 const status = row['Status (Aktif/Nonaktif)']?.toString().trim().toLowerCase()
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest) {
                         .from('m_master_tariffs')
                         .update({
                             name,
+                            service_type: serviceType,
                             amount,
                             type,
                             is_active,
@@ -78,6 +80,7 @@ export async function POST(request: NextRequest) {
                         .insert({
                             code,
                             name,
+                            service_type: serviceType,
                             amount,
                             type,
                             is_active

@@ -403,7 +403,7 @@ export default function SubIndicatorFormDialog({
                                         <option value="">-- Pilih dari Master --</option>
                                         {masterTariffs.map(t => (
                                             <option key={t.id} value={t.id}>
-                                                [{t.code}] {t.name} ({t.type === 'activity' ? `Rp ${t.amount.toLocaleString()}` : t.amount})
+                                                [{t.code}] {t.service_type ? `${t.service_type} - ` : ''}{t.name} ({t.type === 'activity' ? `Rp ${t.amount.toLocaleString()}` : t.amount})
                                             </option>
                                         ))}
                                     </select>

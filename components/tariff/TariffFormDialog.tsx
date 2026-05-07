@@ -26,6 +26,7 @@ interface Tariff {
     id: string
     code: string
     name: string
+    service_type?: string
     amount: number
     type: 'index' | 'activity'
     is_active: boolean
@@ -44,6 +45,7 @@ export function TariffFormDialog({ tariff, open, onOpenChange }: TariffFormDialo
     const [formData, setFormData] = useState({
         code: '',
         name: '',
+        service_type: '',
         amount: 0,
         type: 'index' as 'index' | 'activity',
         is_active: true
@@ -54,6 +56,7 @@ export function TariffFormDialog({ tariff, open, onOpenChange }: TariffFormDialo
             setFormData({
                 code: tariff.code,
                 name: tariff.name,
+                service_type: tariff.service_type || '',
                 amount: tariff.amount,
                 type: tariff.type,
                 is_active: tariff.is_active
@@ -62,6 +65,7 @@ export function TariffFormDialog({ tariff, open, onOpenChange }: TariffFormDialo
             setFormData({
                 code: '',
                 name: '',
+                service_type: '',
                 amount: 0,
                 type: 'index',
                 is_active: true
@@ -71,8 +75,8 @@ export function TariffFormDialog({ tariff, open, onOpenChange }: TariffFormDialo
     }, [tariff, open])
 
     const handleSave = async () => {
-        if (!formData.code || !formData.name) {
-            setError('Kode dan Nama wajib diisi')
+        if (!formData.code || !formData.name || !formData.service_type) {
+            setError('Kode, Nama, dan Jenis Layanan wajib diisi')
             return
         }
 
@@ -142,7 +146,31 @@ export function TariffFormDialog({ tariff, open, onOpenChange }: TariffFormDialo
                     </div>
 
                     <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="name" className="text-right">Nama</Label>
+                        <Label htmlFor="service_type" className="text-right whitespace-nowrap">Jenis Layanan</Label>
+                        <Select
+                            value={formData.service_type}
+                            onValueChange={(val) => setFormData({ ...formData, service_type: val })}
+                        >
+                            <SelectTrigger className="col-span-3">
+                                <SelectValue placeholder="Pilih jenis layanan" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="Rawat Jalan">Rawat Jalan</SelectItem>
+                                <SelectItem value="Rawat Inap">Rawat Inap</SelectItem>
+                                <SelectItem value="Operatif">Operatif</SelectItem>
+                                <SelectItem value="Cathlab">Cathlab</SelectItem>
+                                <SelectItem value="Lab-PK">Lab-PK</SelectItem>
+                                <SelectItem value="Lab-PA">Lab-PA</SelectItem>
+                                <SelectItem value="Lab-MK">Lab-MK</SelectItem>
+                                <SelectItem value="Radiologi">Radiologi</SelectItem>
+                                <SelectItem value="Farmasi">Farmasi</SelectItem>
+                                <SelectItem value="Nutrisionis">Nutrisionis</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="name" className="text-right text-gray-700">Nama</Label>
                         <Input
                             id="name"
                             placeholder="Nama tarif atau aktivitas"

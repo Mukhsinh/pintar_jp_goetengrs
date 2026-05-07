@@ -7,6 +7,7 @@ export async function GET() {
         const templateData = [
             {
                 'Kode': 'TRF-001',
+                'Jenis Layanan': 'Rawat Jalan',
                 'Nama': 'Kunjungan Pasien Poliklinik',
                 'Tipe (Aktivitas/Indeks)': 'Aktivitas',
                 'Nilai/Tarif': 5000,
@@ -14,6 +15,7 @@ export async function GET() {
             },
             {
                 'Kode': 'IDX-001',
+                'Jenis Layanan': 'Radiologi',
                 'Nama': 'Visite Dokter Spesialis',
                 'Tipe (Aktivitas/Indeks)': 'Indeks',
                 'Nilai/Tarif': 0.125,

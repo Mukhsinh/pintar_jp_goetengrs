@@ -19,6 +19,7 @@ interface Tariff {
     id: string
     code: string
     name: string
+    service_type?: string
     amount: number
     type: 'index' | 'activity'
     is_active: boolean
@@ -160,9 +161,10 @@ export const TariffTable = memo(function TariffTable({ tariffs }: TariffTablePro
                     <TableHeader className="bg-gray-50">
                         <TableRow>
                             <TableHead className="w-[120px]">Kode</TableHead>
+                            <TableHead className="w-[150px]">Jenis Layanan</TableHead>
                             <TableHead>Nama Tarif / Aktivitas</TableHead>
                             <TableHead className="w-[150px]">Tipe</TableHead>
-                            <TableHead className="w-[200px] text-right">Nilai / Tarif</TableHead>
+                            <TableHead className="w-[150px] text-right">Nilai / Tarif</TableHead>
                             <TableHead className="w-[120px] text-center">Status</TableHead>
                             <TableHead className="w-[120px] text-right">Aksi</TableHead>
                         </TableRow>
@@ -170,7 +172,7 @@ export const TariffTable = memo(function TariffTable({ tariffs }: TariffTablePro
                     <TableBody>
                         {tariffs.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={6} className="text-center py-10 text-gray-500">
+                                <TableCell colSpan={7} className="text-center py-10 text-gray-500">
                                     Tidak ada data tarif ditemukan
                                 </TableCell>
                             </TableRow>
@@ -178,6 +180,11 @@ export const TariffTable = memo(function TariffTable({ tariffs }: TariffTablePro
                             tariffs.map((tariff) => (
                                 <TableRow key={tariff.id} className="hover:bg-gray-50/50 transition-colors">
                                     <TableCell className="font-mono text-xs font-bold text-gray-600">{tariff.code}</TableCell>
+                                    <TableCell>
+                                        <span className="text-xs font-semibold px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                                            {tariff.service_type || '-'}
+                                        </span>
+                                    </TableCell>
                                     <TableCell className="font-medium text-gray-900">{tariff.name}</TableCell>
                                     <TableCell>
                                         <span className={cn(

@@ -155,6 +155,7 @@ export function TariffFormDialog({ tariff, open, onOpenChange }: TariffFormDialo
                                 <SelectValue placeholder="Pilih jenis layanan" />
                             </SelectTrigger>
                             <SelectContent>
+                                <SelectItem value="Garansi Fee">Garansi Fee</SelectItem>
                                 <SelectItem value="Rawat Jalan">Rawat Jalan</SelectItem>
                                 <SelectItem value="Rawat Inap">Rawat Inap</SelectItem>
                                 <SelectItem value="IBS">IBS</SelectItem>

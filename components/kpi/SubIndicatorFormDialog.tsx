@@ -29,6 +29,7 @@ interface SubIndicatorFormDialogProps {
 
 
 const SERVICE_TYPES = [
+    'Garansi Fee',
     'Rawat Jalan',
     'Rawat Inap',
     'IBS',

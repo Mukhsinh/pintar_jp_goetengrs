@@ -11,7 +11,7 @@ export async function getPegawai(
 ): Promise<{ data: Pegawai[]; count: number; error?: string }> {
   try {
     const supabase = createClient()
-    
+
     let query = supabase
       .from('m_employees')
       .select(`
@@ -22,31 +22,31 @@ export async function getPegawai(
         m_units(name)
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
-    
+
     // Apply search filter
     if (searchTerm) {
       query = query.or(`full_name.ilike.%${searchTerm}%,employee_code.ilike.%${searchTerm}%,position.ilike.%${searchTerm}%`)
     }
-    
+
     // Apply pagination
     const from = (page - 1) * pageSize
     const to = from + pageSize - 1
     query = query.range(from, to)
-    
+
     const { data, error, count } = await query
-    
+
     if (error) {
       return { data: [], count: 0, error: error.message }
     }
-    
+
     // Transform data to match Pegawai type
     const transformedData: Pegawai[] = (data || []).map((item: any) => ({
       ...item,
-      m_units: Array.isArray(item.m_units) && item.m_units.length > 0 
-        ? item.m_units[0] 
+      m_units: Array.isArray(item.m_units) && item.m_units.length > 0
+        ? item.m_units[0]
         : undefined
     }))
-    
+
     return { data: transformedData, count: count || 0 }
   } catch (err: any) {
     return { data: [], count: 0, error: err.message }
@@ -61,11 +61,11 @@ export async function getPegawaiById(
 ): Promise<{ pegawai: Pegawai | null; error?: string }> {
   try {
     const supabase = createClient()
-    
+
     const { data, error } = await supabase
       .from('m_employees')
       .select(`
-        id, employee_code, full_name, unit_id, position, phone, address,
+        id, employee_code, full_name, unit_id, position, phone,
         nik, bank_name, bank_account_number, bank_account_name,
         tax_status, employee_status, tax_type, pns_grade,
         is_active, created_at, updated_at,
@@ -73,19 +73,19 @@ export async function getPegawaiById(
       `)
       .eq('id', id)
       .single()
-    
+
     if (error) {
       return { pegawai: null, error: error.message }
     }
-    
+
     // Transform data to match Pegawai type
     const transformedData: Pegawai = {
       ...data,
-      m_units: Array.isArray(data.m_units) && data.m_units.length > 0 
-        ? data.m_units[0] 
+      m_units: Array.isArray(data.m_units) && data.m_units.length > 0
+        ? data.m_units[0]
         : undefined
     }
-    
+
     return { pegawai: transformedData }
   } catch (err: any) {
     return { pegawai: null, error: err.message }
@@ -100,18 +100,18 @@ export async function createPegawai(
 ): Promise<{ success: boolean; pegawai?: Pegawai; error?: string }> {
   try {
     const supabase = createClient()
-    
+
     // Check if employee code already exists
     const { data: existingCode } = await supabase
       .from('m_employees')
       .select('id')
       .eq('employee_code', input.employee_code)
       .single()
-    
+
     if (existingCode) {
       return { success: false, error: 'Kode pegawai sudah digunakan' }
     }
-    
+
     // Check if NIK already exists (if provided)
     if (input.nik) {
       const { data: existingNik } = await supabase
@@ -119,12 +119,12 @@ export async function createPegawai(
         .select('id')
         .eq('nik', input.nik)
         .single()
-      
+
       if (existingNik) {
         return { success: false, error: 'NIK sudah terdaftar' }
       }
     }
-    
+
     // Create pegawai record
     const { data, error } = await supabase
       .from('m_employees')
@@ -134,7 +134,6 @@ export async function createPegawai(
         unit_id: input.unit_id,
         position: input.position || null,
         phone: input.phone || null,
-        address: input.address || null,
         nik: input.nik || null,
         bank_name: input.bank_name || null,
         bank_account_number: input.bank_account_number || null,
@@ -147,11 +146,11 @@ export async function createPegawai(
       })
       .select()
       .single()
-    
+
     if (error) {
       return { success: false, error: error.message }
     }
-    
+
     return { success: true, pegawai: data as Pegawai }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -167,7 +166,7 @@ export async function updatePegawai(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const supabase = createClient()
-    
+
     // Check if employee code already exists (if being updated)
     if (updates.employee_code) {
       const { data: existingCode } = await supabase
@@ -176,12 +175,12 @@ export async function updatePegawai(
         .eq('employee_code', updates.employee_code)
         .neq('id', id)
         .single()
-      
+
       if (existingCode) {
         return { success: false, error: 'Kode pegawai sudah digunakan' }
       }
     }
-    
+
     // Check if NIK already exists (if being updated)
     if (updates.nik) {
       const { data: existingNik } = await supabase
@@ -190,12 +189,12 @@ export async function updatePegawai(
         .eq('nik', updates.nik)
         .neq('id', id)
         .single()
-      
+
       if (existingNik) {
         return { success: false, error: 'NIK sudah terdaftar' }
       }
     }
-    
+
     // Update pegawai record
     const { error } = await supabase
       .from('m_employees')
@@ -204,11 +203,11 @@ export async function updatePegawai(
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
-    
+
     if (error) {
       return { success: false, error: error.message }
     }
-    
+
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -223,20 +222,20 @@ export async function deactivatePegawai(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const supabase = createClient()
-    
+
     // Update pegawai record
     const { error } = await supabase
       .from('m_employees')
-      .update({ 
+      .update({
         is_active: false,
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
-    
+
     if (error) {
       return { success: false, error: error.message }
     }
-    
+
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -251,17 +250,17 @@ export async function deletePegawai(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const supabase = createClient()
-    
+
     // Delete pegawai record (will cascade to related data via RLS)
     const { error } = await supabase
       .from('m_employees')
       .delete()
       .eq('id', id)
-    
+
     if (error) {
       return { success: false, error: error.message }
     }
-    
+
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -276,11 +275,11 @@ export async function getPegawaiByUnit(
 ): Promise<{ data: Pegawai[]; error?: string }> {
   try {
     const supabase = createClient()
-    
+
     const { data, error } = await supabase
       .from('m_employees')
       .select(`
-        id, employee_code, full_name, unit_id, position, phone, address,
+        id, employee_code, full_name, unit_id, position, phone,
         nik, bank_name, bank_account_number, bank_account_name,
         tax_status, employee_status, tax_type, pns_grade,
         is_active, created_at, updated_at,
@@ -289,19 +288,19 @@ export async function getPegawaiByUnit(
       .eq('unit_id', unitId)
       .eq('is_active', true)
       .order('full_name', { ascending: true })
-    
+
     if (error) {
       return { data: [], error: error.message }
     }
-    
+
     // Transform data to match Pegawai type
     const transformedData: Pegawai[] = (data || []).map((item: any) => ({
       ...item,
-      m_units: Array.isArray(item.m_units) && item.m_units.length > 0 
-        ? item.m_units[0] 
+      m_units: Array.isArray(item.m_units) && item.m_units.length > 0
+        ? item.m_units[0]
         : undefined
     }))
-    
+
     return { data: transformedData }
   } catch (err: any) {
     return { data: [], error: err.message }
@@ -316,35 +315,35 @@ export async function hardDeletePegawai(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const supabase = createClient()
-    
+
     // Check if pegawai has realization data
     const { data: realizationData, error: realizationError } = await supabase
       .from('t_realization')
       .select('id')
       .eq('employee_id', id)
       .limit(1)
-    
+
     if (realizationError) {
       return { success: false, error: realizationError.message }
     }
-    
+
     if (realizationData && realizationData.length > 0) {
-      return { 
-        success: false, 
-        error: 'Tidak dapat menghapus pegawai yang memiliki data realisasi. Gunakan nonaktifkan sebagai gantinya.' 
+      return {
+        success: false,
+        error: 'Tidak dapat menghapus pegawai yang memiliki data realisasi. Gunakan nonaktifkan sebagai gantinya.'
       }
     }
-    
+
     // Delete pegawai record
     const { error } = await supabase
       .from('m_employees')
       .delete()
       .eq('id', id)
-    
+
     if (error) {
       return { success: false, error: error.message }
     }
-    
+
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }

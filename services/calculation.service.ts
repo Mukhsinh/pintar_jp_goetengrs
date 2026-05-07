@@ -16,12 +16,15 @@ import {
 
 interface IndicatorRealization {
   indicator_id: string
+  sub_indicator_id?: string | null
   realization_value: number
   target_value: number
   weight_percentage: number
   category: 'P1' | 'P2' | 'P3'
   is_activity: boolean
   basic_index_value: number
+  measurement_type: 'scoring' | 'quantitative'
+  unit_tariff: number
 }
 
 interface ValidationError {
@@ -74,32 +77,32 @@ export async function calculateIndividualScores(period: string) {
 
     employeeData.forEach((r: any) => {
       const indicator = r.m_kpi_indicators
+      const subIndicator = r.m_kpi_sub_indicators
       let category: string
       let targetValue: number
       let weightPercentage: number
 
       if (dataSource === 'assessment') {
-        // Assessment data already has target_value and weight_percentage
-        const catData = indicator.m_kpi_categories
-        category = catData.category
+        category = indicator.m_kpi_categories.category
         targetValue = r.target_value
         weightPercentage = r.weight_percentage
       } else {
-        // Realization data gets these from the indicator
-        const catData = indicator.m_kpi_categories
-        category = catData.category
+        category = indicator.m_kpi_categories.category
         targetValue = indicator.target_value
         weightPercentage = indicator.weight_percentage
       }
 
       const data: IndicatorRealization = {
         indicator_id: r.indicator_id,
+        sub_indicator_id: r.sub_indicator_id,
         realization_value: r.realization_value,
         target_value: targetValue,
         weight_percentage: weightPercentage,
         category: category as 'P1' | 'P2' | 'P3',
         is_activity: indicator.m_kpi_categories.configuration_style === 'activity',
-        basic_index_value: indicator.basic_index_value || 0
+        basic_index_value: subIndicator?.base_index_value || indicator.basic_index_value || 0,
+        measurement_type: subIndicator?.measurement_type || 'scoring',
+        unit_tariff: subIndicator?.unit_tariff || 0
       }
 
       if (category === 'P1') p1Indicators.push(data)
@@ -113,46 +116,33 @@ export async function calculateIndividualScores(period: string) {
       let totalActivityRupiah = 0
 
       const scores = indicators.map(ind => {
+        // Quantitative logic: Score = Realization * BaseIndexValue / Tariff
+        if (ind.measurement_type === 'quantitative') {
+          if (ind.is_activity) {
+            // Berbasis Aktivitas: Direct Rupiah (Volume * Tariff)
+            const actRupiah = new Decimal(ind.realization_value).mul(ind.unit_tariff)
+            totalActivityRupiah += actRupiah.toNumber()
+            return 0
+          } else {
+            // Berbasis Indeks: Convert Volume to "Index Points" 
+            // Score = Realization * BaseIndexValue
+            const indexPoints = new Decimal(ind.realization_value).mul(ind.basic_index_value)
+            return indexPoints.toNumber()
+          }
+        }
+
+        // Standard Scoring logic (0-100)
+        const achievement = calculateAchievementPercentage(ind.realization_value, ind.target_value)
+        const weighted = calculateWeightedIndicatorScore(toNumber(achievement), ind.weight_percentage)
+
         if (ind.is_activity) {
+          // If activity-based but using scoring (unlikely but supported)
           const actRupiah = calculateActivityRupiah(ind.realization_value, ind.basic_index_value)
           totalActivityRupiah += actRupiah.toNumber()
-
-          // Still calculate indicator score for reference if needed, though weight is likely 0
-          const achievement = calculateAchievementPercentage(ind.realization_value, ind.target_value)
-          const weighted = calculateWeightedIndicatorScore(toNumber(achievement), ind.weight_percentage)
-
-          // Update table with calculated values
-          const table = dataSource === 'assessment' ? 't_kpi_assessments' : 't_realization'
-          supabase
-            .from(table)
-            .update({
-              achievement_percentage: toNumber(achievement),
-              score: toNumber(weighted),
-            })
-            .eq('indicator_id', ind.indicator_id)
-            .eq('employee_id', employee.id)
-            .eq('period', period)
-            .then()
-
-          return toNumber(weighted)
-        } else {
-          const achievement = calculateAchievementPercentage(ind.realization_value, ind.target_value)
-          const weighted = calculateWeightedIndicatorScore(toNumber(achievement), ind.weight_percentage)
-
-          const table = dataSource === 'assessment' ? 't_kpi_assessments' : 't_realization'
-          supabase
-            .from(table)
-            .update({
-              achievement_percentage: toNumber(achievement),
-              score: toNumber(weighted),
-            })
-            .eq('indicator_id', ind.indicator_id)
-            .eq('employee_id', employee.id)
-            .eq('period', period)
-            .then()
-
-          return toNumber(weighted)
+          return 0
         }
+
+        return toNumber(weighted)
       })
 
       totalIndexScore = toNumber(aggregateCategoryScore(scores))
@@ -413,27 +403,31 @@ export async function calculateFinalDistribution(period: string) {
       return sum + emp.t_individual_scores[0].individual_total_score
     }, 0)
 
-    // Calculate remaining unit allocation for index-based distribution
-    const remainingUnitAllocation = unitAllocation.minus(totalUnitActivityRupiah)
+    // Calculate PIR (Proportion Index Ratio) for this unit
+    const { calculatePIR } = await import('@/lib/formulas/kpi-calculator')
+    const pirValue = calculatePIR(
+      toNumber(unitAllocation),
+      totalUnitActivityRupiah,
+      totalUnitScores
+    )
 
     // Distribute to each employee
     for (const employee of employees!) {
       const empScore = (employee as any).t_individual_scores[0].individual_total_score
       const empActivityRupiah = (employee as any).t_individual_scores[0].activity_rupiah || 0
 
-      // Calculate index-based portion of incentive
-      const { proportion, grossIncentive: indexIncentive } = calculateIndividualIncentive(
-        toNumber(remainingUnitAllocation),
+      // Calculate incentive using the new PIR-aware function
+      const { proportion, grossIncentive, indexIncentive, activityIncentive } = calculateIndividualIncentive(
+        toNumber(unitAllocation),
         empScore,
-        totalUnitScores
+        totalUnitScores,
+        empActivityRupiah,
+        toNumber(pirValue)
       )
-
-      // Total gross is activity-based + index-based
-      const totalGrossIncentive = indexIncentive.plus(empActivityRupiah)
 
       // Calculate tax and net incentive
       const incentiveDistribution = calculateNetIncentive(
-        toNumber(totalGrossIncentive),
+        toNumber(grossIncentive),
         employee.tax_status
       )
 
@@ -458,7 +452,7 @@ export async function calculateFinalDistribution(period: string) {
             unit_id: unit.id,
             total_unit_scores: totalUnitScores,
             total_unit_activity_rupiah: totalUnitActivityRupiah,
-            remaining_unit_allocation: toNumber(remainingUnitAllocation),
+            pir_value: toNumber(pirValue),
             calculated_at: new Date().toISOString(),
           },
         }, {

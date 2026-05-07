@@ -52,6 +52,7 @@ export class DataFetcher {
           achievement_percentage,
           score,
           indicator_id,
+          sub_indicator_id,
           period,
           m_kpi_indicators!inner (
             id,
@@ -64,12 +65,18 @@ export class DataFetcher {
               unit_id,
               configuration_style
             )
+          ),
+          m_kpi_sub_indicators!left (
+            measurement_type,
+            unit_tariff,
+            base_index_value
           )
         ),
         t_realization!left (
           id,
           realization_value,
           indicator_id,
+          sub_indicator_id,
           period,
           m_kpi_indicators!inner (
             id,
@@ -82,6 +89,11 @@ export class DataFetcher {
               unit_id,
               configuration_style
             )
+          ),
+          m_kpi_sub_indicators!left (
+            measurement_type,
+            unit_tariff,
+            base_index_value
           )
         )
       `)

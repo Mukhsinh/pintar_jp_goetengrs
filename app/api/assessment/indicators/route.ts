@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
     // Get ALL categories (not filtered by unit_id) first, to check if data exists
     const { data: allCategories, error: allCatError } = await adminClient
       .from('m_kpi_categories')
-      .select('id, category_name, category, weight_percentage, unit_id')
+      .select('id, category_name, category, weight_percentage, unit_id, configuration_style')
       .eq('is_active', true)
 
     console.log('[indicators] allCategories count:', allCategories?.length, 'error:', allCatError?.message)
@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
     if (indicatorIds.length > 0) {
       const { data: subInds, error: subIndicatorsError } = await adminClient
         .from('m_kpi_sub_indicators')
-        .select('id, indicator_id, code, name, target_value, weight_percentage, scoring_criteria, measurement_unit, description')
+        .select('id, indicator_id, code, name, target_value, weight_percentage, scoring_criteria, measurement_unit, description, measurement_type, unit_tariff, base_index_value')
         .eq('is_active', true)
         .in('indicator_id', indicatorIds)
 
@@ -164,7 +164,10 @@ export async function GET(request: NextRequest) {
         weight_percentage: sub.weight_percentage,
         scoring_criteria: sub.scoring_criteria || [],
         measurement_unit: sub.measurement_unit,
-        description: sub.description
+        description: sub.description,
+        measurement_type: sub.measurement_type,
+        unit_tariff: sub.unit_tariff,
+        base_index_value: sub.base_index_value
       })
 
     })
@@ -203,6 +206,7 @@ export async function GET(request: NextRequest) {
         category_name: category?.category_name || 'Tanpa Kategori',
         category_type: category?.category || 'Unknown',
         category_weight: category?.weight_percentage || 0,
+        category_style: category?.configuration_style || 'index',
         measurement_unit: indicator.measurement_unit,
         description: indicator.description,
         sub_indicators: subIndicatorMap.get(indicator.id) || [],

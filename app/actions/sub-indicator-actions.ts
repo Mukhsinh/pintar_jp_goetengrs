@@ -11,9 +11,12 @@ export async function createSubIndicator(formData: {
   target_value?: number
   measurement_unit?: string
   scoring_criteria: Array<{ score: number; label: string }>
+  measurement_type?: 'scoring' | 'quantitative'
+  unit_tariff?: number
+  base_index_value?: number
 }) {
   const supabase = await createClient()
-  
+
   try {
     // Validate user has permission
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -91,8 +94,8 @@ export async function createSubIndicator(formData: {
     return { success: true, data }
   } catch (error: any) {
     console.error('Server action error:', error)
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: error.message || 'Gagal menyimpan sub indicator'
     }
   }
@@ -105,9 +108,12 @@ export async function updateSubIndicator(id: string, formData: {
   target_value?: number
   measurement_unit?: string
   scoring_criteria: Array<{ score: number; label: string }>
+  measurement_type?: 'scoring' | 'quantitative'
+  unit_tariff?: number
+  base_index_value?: number
 }) {
   const supabase = await createClient()
-  
+
   try {
     // Validate user has permission
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -176,8 +182,8 @@ export async function updateSubIndicator(id: string, formData: {
     return { success: true, data }
   } catch (error: any) {
     console.error('Server action error:', error)
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: error.message || 'Gagal mengupdate sub indicator'
     }
   }
@@ -185,7 +191,7 @@ export async function updateSubIndicator(id: string, formData: {
 
 export async function deleteSubIndicator(id: string) {
   const supabase = await createClient()
-  
+
   try {
     // Validate user has permission
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -229,8 +235,8 @@ export async function deleteSubIndicator(id: string) {
     return { success: true, data }
   } catch (error: any) {
     console.error('Server action error:', error)
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: error.message || 'Gagal menghapus sub indicator'
     }
   }

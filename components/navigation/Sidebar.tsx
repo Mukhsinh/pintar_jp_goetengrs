@@ -23,7 +23,8 @@ import {
   Menu,
   X,
   Bell,
-  ClipboardCheck
+  ClipboardCheck,
+  Banknote
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -60,6 +61,7 @@ const iconMap: Record<string, React.ElementType> = {
   User,
   Bell,
   ClipboardCheck,
+  Banknote,
 }
 
 const ALL_MENU_ITEMS: MenuItem[] = [
@@ -68,6 +70,7 @@ const ALL_MENU_ITEMS: MenuItem[] = [
   { id: 'pegawai', label: 'Data Pegawai', path: '/pegawai', icon: 'UserCheck' },
   { id: 'units', label: 'Unit Kerja', path: '/units', icon: 'Building2' },
   { id: 'kpi-config', label: 'Konfigurasi KPI', path: '/kpi-config', icon: 'Target' },
+  { id: 'master-tarif', label: 'Master Tarif', path: '/master-tarif', icon: 'Banknote' },
   { id: 'pool', label: 'Pool Insentif', path: '/pool', icon: 'Wallet' },
   { id: 'assessment', label: 'Penilaian KPI', path: '/assessment', icon: 'ClipboardCheck' },
   { id: 'reports', label: 'Laporan', path: '/reports', icon: 'FileText' },

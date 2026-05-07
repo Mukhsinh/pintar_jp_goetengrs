@@ -32,6 +32,9 @@ interface KPISubIndicator {
   scoring_criteria: ScoringCriterion[]
   measurement_unit?: string
   description?: string
+  measurement_type?: 'scoring' | 'quantitative'
+  unit_tariff?: number
+  base_index_value?: number
 }
 
 interface KPIIndicator {
@@ -49,6 +52,7 @@ interface KPICategory {
   category: string
   category_name: string
   weight_percentage: number
+  configuration_style?: 'index' | 'activity'
   indicators: KPIIndicator[]
 }
 
@@ -569,7 +573,8 @@ export default function AssessmentFormDialog({
                                   const subAssessment = assessment?.sub_assessments?.find(sa => sa.sub_indicator_id === sub.id)
                                   const subRealization = subAssessment?.realization_value || 0
                                   const subScore = subAssessment?.score || 0
-                                  const hasCriteria = sub.scoring_criteria && sub.scoring_criteria.length > 0
+                                  const isQuantitative = sub.measurement_type === 'quantitative'
+                                  const hasCriteria = !isQuantitative && sub.scoring_criteria && sub.scoring_criteria.length > 0
 
                                   return (
                                     <div key={sub.id} className="bg-blue-50/30 p-3 rounded-lg border border-blue-100">
@@ -579,14 +584,56 @@ export default function AssessmentFormDialog({
                                           <p className="text-xs text-gray-500">
                                             Bobot: {sub.weight_percentage}%
                                             {sub.target_value > 0 && ` • Target: ${sub.target_value}`}
+                                            {isQuantitative && sub.measurement_unit && ` • Satuan: ${sub.measurement_unit}`}
                                           </p>
                                         </div>
                                         <Badge variant="outline" className="bg-white text-xs">
-                                          Skor: {subScore.toFixed(2)}
+                                          {isQuantitative ? `Volume: ${subRealization}` : `Skor: ${subScore.toFixed(2)}`}
                                         </Badge>
                                       </div>
 
-                                      {hasCriteria ? (
+                                      {isQuantitative ? (
+                                        <div className="space-y-2">
+                                          <div className="flex items-center gap-2">
+                                            <div className="flex-1">
+                                              <Label className="text-[10px] text-gray-500 mb-1 block">Input Volume ({sub.measurement_unit || 'qty'})</Label>
+                                              <Input
+                                                type="number"
+                                                step="0.01"
+                                                className="h-8 text-sm bg-white"
+                                                placeholder="0.00"
+                                                value={subRealization || ''}
+                                                onChange={(e) => {
+                                                  const vol = parseFloat(e.target.value) || 0
+                                                  // Calculation logic for quantitative score:
+                                                  // For Activity: Volume * Tariff
+                                                  // For Index: Volume * Base Index
+                                                  // The actual decision is in the calculation engine, but here we need a 'score'
+                                                  // to contribute to the indicator.
+                                                  // If category is activity, score is Rupiah. If index, score is Poin.
+                                                  const category = categories.find(c => c.indicators.some(i => i.id === indicator.id))
+                                                  const isActivity = category?.configuration_style === 'activity'
+
+                                                  let calculatedScore = 0
+                                                  if (isActivity) {
+                                                    calculatedScore = vol * (sub.unit_tariff || 0)
+                                                  } else {
+                                                    calculatedScore = vol * (sub.base_index_value || 0)
+                                                  }
+
+                                                  handleSubAssessmentChange(indicator.id, sub.id, vol, calculatedScore)
+                                                }}
+                                              />
+                                            </div>
+                                            <div className="w-1/3">
+                                              <Label className="text-[10px] text-gray-500 mb-1 block">Hasil Skor/Nilai</Label>
+                                              <div className="h-8 text-xs bg-gray-100 border rounded flex items-center px-2 font-medium">
+                                                {subScore.toLocaleString('id-ID')}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : hasCriteria ? (
                                         <div className="flex flex-wrap gap-2 mt-1">
                                           {sub.scoring_criteria.map((criterion, cIdx) => (
                                             <Button
@@ -602,19 +649,21 @@ export default function AssessmentFormDialog({
                                           ))}
                                         </div>
                                       ) : (
-                                        <Input
-                                          type="number"
-                                          size={1}
-                                          className="h-8 text-sm mt-1 bg-white"
-                                          placeholder="Ketik nilai..."
-                                          value={subRealization || ''}
-                                          onChange={(e) => {
-                                            const val = parseFloat(e.target.value) || 0
-                                            const sTarget = sub.target_value || 1
-                                            const sScore = (val / sTarget) * 100
-                                            handleSubAssessmentChange(indicator.id, sub.id, val, sScore)
-                                          }}
-                                        />
+                                        <div className="space-y-1">
+                                          <Label className="text-[10px] text-gray-500 mb-1 block">Input Nilai Pencapaian (%)</Label>
+                                          <Input
+                                            type="number"
+                                            className="h-8 text-sm mt-1 bg-white"
+                                            placeholder="Ketik nilai..."
+                                            value={subRealization || ''}
+                                            onChange={(e) => {
+                                              const val = parseFloat(e.target.value) || 0
+                                              const sTarget = sub.target_value || 100
+                                              const sScore = (val / sTarget) * 100
+                                              handleSubAssessmentChange(indicator.id, sub.id, val, sScore)
+                                            }}
+                                          />
+                                        </div>
                                       )}
                                     </div>
                                   )

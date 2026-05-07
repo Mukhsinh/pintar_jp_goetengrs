@@ -24,6 +24,7 @@ export interface IndividualScores {
   p3Weighted: Decimal;
   totalIndividualScore: Decimal;
   activityRupiah: Decimal;
+  isActivity: boolean;
 }
 
 /**
@@ -35,6 +36,7 @@ export interface FinalScore {
   unitWeight: Decimal;
   individualWeight: Decimal;
   finalScore: Decimal;
+  pirValue?: Decimal; // PIR (Proportion Index Ratio) for index-based distribution
 }
 
 /**
@@ -55,7 +57,8 @@ export function calculateIndividualScore(
   p2Score: number,
   p3Score: number,
   weights: { p1: number; p2: number; p3: number },
-  activityRupiah: number = 0
+  activityRupiah: number = 0,
+  isActivity: boolean = false
 ): IndividualScores {
   const p1 = new Decimal(p1Score);
   const p2 = new Decimal(p2Score);
@@ -80,6 +83,7 @@ export function calculateIndividualScore(
     p3Weighted,
     totalIndividualScore,
     activityRupiah: new Decimal(activityRupiah),
+    isActivity
   };
 }
 
@@ -157,26 +161,68 @@ export function calculateUnitAllocation(
 export function calculateIndividualIncentive(
   unitAllocation: number,
   employeeFinalScore: number,
-  totalUnitScores: number
-): { proportion: Decimal; grossIncentive: Decimal } {
+  totalUnitScores: number,
+  activityRupiah: number = 0,
+  pirValue: number | null = null
+): { proportion: Decimal; grossIncentive: Decimal; indexIncentive: Decimal; activityIncentive: Decimal } {
   const unitAlloc = new Decimal(unitAllocation);
   const empScore = new Decimal(employeeFinalScore);
   const totalScore = new Decimal(totalUnitScores);
+  const actRupiah = new Decimal(activityRupiah);
 
+  // If PIR is provided, use the new hybrid formula
+  if (pirValue !== null) {
+    const pir = new Decimal(pirValue);
+    const indexIncentive = empScore.mul(pir);
+    const grossIncentive = indexIncentive.plus(actRupiah);
+
+    return {
+      proportion: totalScore.isZero() ? new Decimal(0) : empScore.div(totalScore),
+      grossIncentive,
+      indexIncentive,
+      activityIncentive: actRupiah
+    };
+  }
+
+  // Fallback to legacy proportion-based calculation if PIR is not used
   if (totalScore.isZero()) {
     return {
       proportion: new Decimal(0),
-      grossIncentive: new Decimal(0),
+      grossIncentive: actRupiah,
+      indexIncentive: new Decimal(0),
+      activityIncentive: actRupiah
     };
   }
 
   const proportion = empScore.div(totalScore);
-  const grossIncentive = unitAlloc.mul(proportion);
+  const indexIncentive = unitAlloc.mul(proportion);
+  const grossIncentive = indexIncentive.plus(actRupiah);
 
   return {
     proportion,
     grossIncentive,
+    indexIncentive,
+    activityIncentive: actRupiah
   };
+}
+
+/**
+ * Calculate PIR (Proportion Index Ratio)
+ * Formula: PIR = (Unit Allocation - Total Activity Rupiah) / Total Unit Index Scores
+ */
+export function calculatePIR(
+  unitAllocation: number,
+  totalActivityRupiah: number,
+  totalUnitIndexScores: number
+): Decimal {
+  const allocation = new Decimal(unitAllocation);
+  const totalActivity = new Decimal(totalActivityRupiah);
+  const totalScores = new Decimal(totalUnitIndexScores);
+
+  if (totalScores.isZero()) return new Decimal(0);
+
+  const remainingPool = allocation.minus(totalActivity);
+  return remainingPool.div(totalScores);
 }
 
 /**

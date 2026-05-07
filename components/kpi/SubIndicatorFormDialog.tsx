@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Banknote, AlertCircle } from 'lucide-react'
 import type { KPIIndicator, KPISubIndicator, ScoringCriterion } from '@/lib/types/kpi.types'
 
 interface SubIndicatorFormDialogProps {
@@ -49,9 +49,36 @@ export default function SubIndicatorFormDialog({
             { score: 60, label: 'Cukup' },
             { score: 80, label: 'Baik' },
             { score: 100, label: 'Sangat Baik' }
-        ] as ScoringCriterion[]
+        ] as ScoringCriterion[],
+        measurement_type: 'scoring' as 'scoring' | 'quantitative',
+        unit_tariff: '',
+        base_index_value: ''
     })
     const [errors, setErrors] = useState<Record<string, string>>({})
+    const [masterTariffs, setMasterTariffs] = useState<any[]>([])
+    const [selectedMasterTariffId, setSelectedMasterTariffId] = useState<string>('')
+
+    useEffect(() => {
+        async function fetchMasterTariffs() {
+            try {
+                const { data, error } = await supabase
+                    .from('m_master_tariffs')
+                    .select('*')
+                    .eq('is_active', true)
+                    .order('name', { ascending: true })
+
+                if (error) throw error
+                setMasterTariffs(data || [])
+            } catch (err) {
+                console.error('Error fetching master tariffs:', err)
+            }
+        }
+
+        if (open) {
+            fetchMasterTariffs()
+            setSelectedMasterTariffId('')
+        }
+    }, [open])
 
     useEffect(() => {
         if (subIndicator) {
@@ -67,7 +94,10 @@ export default function SubIndicatorFormDialog({
                     { score: 60, label: 'Cukup' },
                     { score: 80, label: 'Baik' },
                     { score: 100, label: 'Sangat Baik' }
-                ]
+                ],
+                measurement_type: (subIndicator.measurement_type as any) || 'scoring',
+                unit_tariff: subIndicator.unit_tariff?.toString() || '',
+                base_index_value: subIndicator.base_index_value?.toString() || ''
             })
         } else {
             setFormData({
@@ -82,7 +112,10 @@ export default function SubIndicatorFormDialog({
                     { score: 60, label: 'Cukup' },
                     { score: 80, label: 'Baik' },
                     { score: 100, label: 'Sangat Baik' }
-                ]
+                ],
+                measurement_type: 'scoring',
+                unit_tariff: '',
+                base_index_value: ''
             })
         }
         setErrors({})
@@ -150,7 +183,7 @@ export default function SubIndicatorFormDialog({
                 const others = existingSubIndicators.filter(s => s.id !== subIndicator?.id)
                 const otherWeightsSum = others.reduce((sum, s) => sum + Number(s.weight_percentage), 0)
                 const totalWeight = otherWeightsSum + weight
-                
+
                 if (totalWeight > 100.01) { // Allow small floating point tolerance
                     newErrors.weight_percentage = `Total bobot akan menjadi ${totalWeight.toFixed(2)}% (maksimal 100%)`
                 }
@@ -202,7 +235,10 @@ export default function SubIndicatorFormDialog({
                 weight_percentage: parseFloat(formData.weight_percentage),
                 target_value: formData.target_value ? parseFloat(formData.target_value) : 100,
                 measurement_unit: formData.measurement_unit.trim() || undefined,
-                scoring_criteria: formData.scoring_criteria
+                scoring_criteria: formData.scoring_criteria,
+                measurement_type: formData.measurement_type,
+                unit_tariff: formData.unit_tariff ? parseFloat(formData.unit_tariff) : undefined,
+                base_index_value: formData.base_index_value ? parseFloat(formData.base_index_value) : undefined
             }
 
             let result
@@ -222,14 +258,14 @@ export default function SubIndicatorFormDialog({
             }
         } catch (error: any) {
             console.error('Error saving sub indicator:', error)
-            
+
             // Show user-friendly error message
             let errorMessage = 'Gagal menyimpan sub indikator'
-            
+
             if (error.message) {
                 errorMessage = error.message
             }
-            
+
             alert(errorMessage)
         } finally {
             setIsSubmitting(false)
@@ -322,7 +358,95 @@ export default function SubIndicatorFormDialog({
                             />
                         </div>
 
-                        {/* Kriteria Pengukuran - Dynamic */}
+                    </div>
+
+                    {/* Measurement Type Selection */}
+                    <div className="space-y-4 border-t pt-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="measurement_type">Kriteria Pengukuran *</Label>
+                            <select
+                                id="measurement_type"
+                                value={formData.measurement_type}
+                                onChange={(e) => setFormData({ ...formData, measurement_type: e.target.value as 'scoring' | 'quantitative' })}
+                                className="w-full px-3 py-2 border rounded-md"
+                            >
+                                <option value="scoring">Pemberian Skor (seperti biasa)</option>
+                                <option value="quantitative">Nilai Kuantitatif (Volume × Tarif/Indeks)</option>
+                            </select>
+                        </div>
+
+                        {formData.measurement_type === 'quantitative' && (
+                            <div className="space-y-4 p-4 bg-orange-50 rounded-lg">
+                                <div className="space-y-2">
+                                    <Label className="flex items-center gap-2">
+                                        <Banknote className="h-4 w-4 text-orange-600" />
+                                        Pilih dari Master Tarif (Opsional)
+                                    </Label>
+                                    <select
+                                        value={selectedMasterTariffId}
+                                        onChange={(e) => {
+                                            const id = e.target.value
+                                            setSelectedMasterTariffId(id)
+                                            if (id) {
+                                                const selected = masterTariffs.find(t => t.id === id)
+                                                if (selected) {
+                                                    if (selected.type === 'activity') {
+                                                        setFormData({ ...formData, unit_tariff: selected.amount.toString(), base_index_value: '' })
+                                                    } else {
+                                                        setFormData({ ...formData, base_index_value: selected.amount.toString(), unit_tariff: '' })
+                                                    }
+                                                }
+                                            }
+                                        }}
+                                        className="w-full px-3 py-2 border rounded-md bg-white"
+                                    >
+                                        <option value="">-- Pilih dari Master --</option>
+                                        {masterTariffs.map(t => (
+                                            <option key={t.id} value={t.id}>
+                                                [{t.code}] {t.name} ({t.type === 'activity' ? `Rp ${t.amount.toLocaleString()}` : t.amount})
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-[10px] text-gray-500 italic">
+                                        Memilih master tarif akan otomatis mengisi kolom di bawah ini.
+                                    </p>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="unit_tariff">Tarif per Volume (Rupiah)</Label>
+                                        <Input
+                                            id="unit_tariff"
+                                            type="number"
+                                            value={formData.unit_tariff}
+                                            onChange={(e) => setFormData({ ...formData, unit_tariff: e.target.value })}
+                                            placeholder="Contoh: 5000"
+                                        />
+                                        <p className="text-[10px] text-gray-500 italic">
+                                            Digunakan jika kategori pengukurannya adalah "Berbasis Aktivitas".
+                                        </p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="base_index_value">Nilai Dasar Indeks / Poin</Label>
+                                        <Input
+                                            id="base_index_value"
+                                            type="number"
+                                            step="0.0001"
+                                            value={formData.base_index_value}
+                                            onChange={(e) => setFormData({ ...formData, base_index_value: e.target.value })}
+                                            placeholder="Contoh: 0.125"
+                                        />
+                                        <p className="text-[10px] text-gray-500 italic">
+                                            Digunakan jika kategori pengukurannya adalah "Berbasis Indeks".
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Kriteria Pengukuran - Dynamic (Only show if scoring) */}
+                    {formData.measurement_type === 'scoring' && (
                         <div className="space-y-4">
                             <div className="border-t pt-4">
                                 <div className="flex items-center justify-between">
@@ -397,14 +521,13 @@ export default function SubIndicatorFormDialog({
 
                             <div className="bg-blue-50 p-3 rounded-md">
                                 <p className="text-sm text-blue-800">
-                                    <strong>Petunjuk:</strong> Skor menunjukkan nilai yang akan diberikan untuk setiap level pencapaian. 
+                                    <strong>Petunjuk:</strong> Skor menunjukkan nilai yang akan diberikan untuk setiap level pencapaian.
                                     Label/Kriteria menjelaskan kondisi atau pencapaian yang diperlukan untuk mendapat skor tersebut.
                                     Anda dapat menambah kriteria sebanyak yang diperlukan dengan mengklik tombol "Tambah Kriteria".
                                 </p>
                             </div>
                         </div>
-                    </div>
-
+                    )}
                     <DialogFooter>
                         <Button
                             type="button"
@@ -420,6 +543,6 @@ export default function SubIndicatorFormDialog({
                     </DialogFooter>
                 </form>
             </DialogContent>
-        </Dialog>
+        </Dialog >
     )
 }

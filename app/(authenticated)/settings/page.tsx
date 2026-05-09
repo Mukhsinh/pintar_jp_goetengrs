@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Upload, Save, Image as ImageIcon } from 'lucide-react'
+import { Upload, Save, Image as ImageIcon, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 interface Settings {
   app_name: string
@@ -110,7 +111,7 @@ export default function SettingsPage() {
       const terRates = settingsMap.ter_rates || {}
       const calcParams = settingsMap.calculation_params || {}
       const sessionTimeout = settingsMap.session_timeout || {}
-      
+
       setSettings({
         app_name: orgSettings.appName || 'JASPEL',
         developer_name: orgSettings.developerName || '',
@@ -225,10 +226,10 @@ export default function SettingsPage() {
       }
 
       const supabase = createClient()
-      
+
       // Get current user
       const { data: { user } } = await supabase.auth.getUser()
-      
+
       // Prepare company_info object
       const companyInfo = {
         appName: settings.app_name,
@@ -243,8 +244,8 @@ export default function SettingsPage() {
       // Upsert company_info
       const { error: companyError } = await supabase
         .from('t_settings')
-        .upsert({ 
-          key: 'company_info', 
+        .upsert({
+          key: 'company_info',
           value: companyInfo,
           updated_by: user?.id,
           updated_at: new Date().toISOString()
@@ -259,11 +260,11 @@ export default function SettingsPage() {
       const footerData = {
         text: settings.footer_text
       }
-      
+
       const { error: footerError } = await supabase
         .from('t_settings')
-        .upsert({ 
-          key: 'footer', 
+        .upsert({
+          key: 'footer',
           value: footerData,
           updated_by: user?.id,
           updated_at: new Date().toISOString()
@@ -288,8 +289,8 @@ export default function SettingsPage() {
 
       const { error: taxRatesError } = await supabase
         .from('t_settings')
-        .upsert({ 
-          key: 'tax_rates', 
+        .upsert({
+          key: 'tax_rates',
           value: taxRatesData,
           updated_by: user?.id,
           updated_at: new Date().toISOString()
@@ -303,8 +304,8 @@ export default function SettingsPage() {
       // Upsert TER rates
       const { error: terRatesError } = await supabase
         .from('t_settings')
-        .upsert({ 
-          key: 'ter_rates', 
+        .upsert({
+          key: 'ter_rates',
           value: settings.ter_rates,
           updated_by: user?.id,
           updated_at: new Date().toISOString()
@@ -318,8 +319,8 @@ export default function SettingsPage() {
       // Upsert calculation params
       const { error: calcError } = await supabase
         .from('t_settings')
-        .upsert({ 
-          key: 'calculation_params', 
+        .upsert({
+          key: 'calculation_params',
           value: settings.calculation_params,
           updated_by: user?.id,
           updated_at: new Date().toISOString()
@@ -333,8 +334,8 @@ export default function SettingsPage() {
       // Upsert session timeout
       const { error: sessionError } = await supabase
         .from('t_settings')
-        .upsert({ 
-          key: 'session_timeout', 
+        .upsert({
+          key: 'session_timeout',
           value: settings.session_timeout,
           updated_by: user?.id,
           updated_at: new Date().toISOString()
@@ -515,145 +516,87 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Konfigurasi Pajak PPh 21</CardTitle>
-          <CardDescription>Persentase pajak berdasarkan status PTKP (dalam %)</CardDescription>
+          <CardTitle>Konfigurasi Pajak PPh 21 (PP 58/2023)</CardTitle>
+          <CardDescription>
+            Perhitungan PPh 21 menggunakan metode Tarif Efektif Rata-rata (TER) secara otomatis
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="tax_tk0">TK/0 (Tidak Kawin, 0 Tanggungan)</Label>
-              <Input
-                id="tax_tk0"
-                type="number"
-                min="0"
-                max="50"
-                step="0.1"
-                value={settings.tax_rates['TK/0']}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  tax_rates: { ...settings.tax_rates, 'TK/0': parseFloat(e.target.value) || 0 }
-                })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tax_k0">K/0 (Kawin, 0 Tanggungan)</Label>
-              <Input
-                id="tax_k0"
-                type="number"
-                min="0"
-                max="50"
-                step="0.1"
-                value={settings.tax_rates['K/0']}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  tax_rates: { ...settings.tax_rates, 'K/0': parseFloat(e.target.value) || 0 }
-                })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tax_k1">K/1 (Kawin, 1 Tanggungan)</Label>
-              <Input
-                id="tax_k1"
-                type="number"
-                min="0"
-                max="50"
-                step="0.1"
-                value={settings.tax_rates['K/1']}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  tax_rates: { ...settings.tax_rates, 'K/1': parseFloat(e.target.value) || 0 }
-                })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tax_k2">K/2 (Kawin, 2 Tanggungan)</Label>
-              <Input
-                id="tax_k2"
-                type="number"
-                min="0"
-                max="50"
-                step="0.1"
-                value={settings.tax_rates['K/2']}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  tax_rates: { ...settings.tax_rates, 'K/2': parseFloat(e.target.value) || 0 }
-                })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tax_k3">K/3 (Kawin, 3 Tanggungan)</Label>
-              <Input
-                id="tax_k3"
-                type="number"
-                min="0"
-                max="50"
-                step="0.1"
-                value={settings.tax_rates['K/3']}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  tax_rates: { ...settings.tax_rates, 'K/3': parseFloat(e.target.value) || 0 }
-                })}
-              />
+        <CardContent className="space-y-6">
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Perhitungan Otomatis</AlertTitle>
+            <AlertDescription className="text-sm">
+              Sistem JASPEL menghitung PPh 21 secara otomatis berdasarkan tabel resmi Lampiran PP 58/2023. Tidak perlu input manual.
+            </AlertDescription>
+          </Alert>
+
+          {/* TER Section: Januari - November */}
+          <div>
+            <h4 className="font-semibold text-sm mb-3">📅 Masa Pajak Januari — November (TER Bulanan)</h4>
+            <p className="text-xs text-gray-600 mb-4">
+              PPh 21 = Penghasilan Bruto Bulanan × Tarif Efektif (sesuai kategori PTKP)
+            </p>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-lg border p-4 bg-blue-50/30">
+                <h5 className="font-semibold text-blue-800 mb-1 text-sm">Kategori A</h5>
+                <p className="text-xs text-blue-700/80 mb-2">PTKP: TK/0, TK/1, K/0</p>
+                <div className="text-xs space-y-0.5 text-gray-600">
+                  <p>• s.d. 5.4jt: 0%</p>
+                  <p>• 5.4jt - 5.65jt: 0.25%</p>
+                  <p>• ... (44 lapisan tarif)</p>
+                  <p>• &gt; 1.419jt: 34%</p>
+                </div>
+              </div>
+              <div className="rounded-lg border p-4 bg-green-50/30">
+                <h5 className="font-semibold text-green-800 mb-1 text-sm">Kategori B</h5>
+                <p className="text-xs text-green-700/80 mb-2">PTKP: TK/2, TK/3, K/1, K/2</p>
+                <div className="text-xs space-y-0.5 text-gray-600">
+                  <p>• s.d. 6.2jt: 0%</p>
+                  <p>• 6.2jt - 6.5jt: 0.25%</p>
+                  <p>• ... (40 lapisan tarif)</p>
+                  <p>• &gt; 1.405jt: 34%</p>
+                </div>
+              </div>
+              <div className="rounded-lg border p-4 bg-orange-50/30">
+                <h5 className="font-semibold text-orange-800 mb-1 text-sm">Kategori C</h5>
+                <p className="text-xs text-orange-700/80 mb-2">PTKP: K/3</p>
+                <div className="text-xs space-y-0.5 text-gray-600">
+                  <p>• s.d. 6.6jt: 0%</p>
+                  <p>• 6.6jt - 6.95jt: 0.25%</p>
+                  <p>• ... (41 lapisan tarif)</p>
+                  <p>• &gt; 1.419jt: 34%</p>
+                </div>
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Konfigurasi Tarif Efektif Rata-rata (TER)</CardTitle>
-          <CardDescription>Tarif pajak berdasarkan kategori penghasilan bruto (dalam %)</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="ter_category_a">Kategori A (Penghasilan s.d. Rp 5.000.000)</Label>
-              <Input
-                id="ter_category_a"
-                type="number"
-                min="0"
-                max="50"
-                step="0.1"
-                value={settings.ter_rates.categoryA}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  ter_rates: { ...settings.ter_rates, categoryA: parseFloat(e.target.value) || 0 }
-                })}
-              />
-              <p className="text-xs text-gray-500">Tarif untuk penghasilan bruto bulanan sampai dengan Rp 5.000.000</p>
+          {/* Progressive Section: Desember */}
+          <div>
+            <h4 className="font-semibold text-sm mb-3">📅 Masa Pajak Desember (Tarif Pasal 17)</h4>
+            <p className="text-xs text-gray-600 mb-4">
+              Perhitungan ulang menggunakan tarif progresif Pasal 17 ayat (1) huruf a UU PPh atas PKP setahun.
+            </p>
+            <div className="rounded-lg border p-4 bg-gray-50/50">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-1 font-semibold">Lapisan Penghasilan Kena Pajak</th>
+                    <th className="text-right py-1 font-semibold">Tarif</th>
+                  </tr>
+                </thead>
+                <tbody className="text-gray-700">
+                  <tr className="border-b border-dashed"><td className="py-1">s.d. Rp 60.000.000</td><td className="text-right">5%</td></tr>
+                  <tr className="border-b border-dashed"><td className="py-1">Rp 60.000.000 — Rp 250.000.000</td><td className="text-right">15%</td></tr>
+                  <tr className="border-b border-dashed"><td className="py-1">Rp 250.000.000 — Rp 500.000.000</td><td className="text-right">25%</td></tr>
+                  <tr className="border-b border-dashed"><td className="py-1">Rp 500.000.000 — Rp 5.000.000.000</td><td className="text-right">30%</td></tr>
+                  <tr><td className="py-1">Di atas Rp 5.000.000.000</td><td className="text-right">35%</td></tr>
+                </tbody>
+              </table>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="ter_category_b">Kategori B (Penghasilan Rp 5.000.001 - Rp 15.000.000)</Label>
-              <Input
-                id="ter_category_b"
-                type="number"
-                min="0"
-                max="50"
-                step="0.1"
-                value={settings.ter_rates.categoryB}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  ter_rates: { ...settings.ter_rates, categoryB: parseFloat(e.target.value) || 0 }
-                })}
-              />
-              <p className="text-xs text-gray-500">Tarif untuk penghasilan bruto bulanan Rp 5.000.001 sampai Rp 15.000.000</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ter_category_c">Kategori C (Penghasilan di atas Rp 15.000.000)</Label>
-              <Input
-                id="ter_category_c"
-                type="number"
-                min="0"
-                max="50"
-                step="0.1"
-                value={settings.ter_rates.categoryC}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  ter_rates: { ...settings.ter_rates, categoryC: parseFloat(e.target.value) || 0 }
-                })}
-              />
-              <p className="text-xs text-gray-500">Tarif untuk penghasilan bruto bulanan di atas Rp 15.000.000</p>
-            </div>
+          </div>
+
+          <div className="text-xs text-gray-500 italic">
+            * Sumber: PP Nomor 58 Tahun 2023 & UU HPP Pasal 17 ayat (1) huruf a. Tabel lengkap tersedia di file Tarif TER.pdf.
           </div>
         </CardContent>
       </Card>
@@ -673,11 +616,11 @@ export default function SettingsPage() {
                 type="number"
                 min="0"
                 value={settings.calculation_params.minScore}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  calculation_params: { 
-                    ...settings.calculation_params, 
-                    minScore: parseFloat(e.target.value) || 0 
+                onChange={(e) => setSettings({
+                  ...settings,
+                  calculation_params: {
+                    ...settings.calculation_params,
+                    minScore: parseFloat(e.target.value) || 0
                   }
                 })}
               />
@@ -689,11 +632,11 @@ export default function SettingsPage() {
                 type="number"
                 min="0"
                 value={settings.calculation_params.maxScore}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  calculation_params: { 
-                    ...settings.calculation_params, 
-                    maxScore: parseFloat(e.target.value) || 0 
+                onChange={(e) => setSettings({
+                  ...settings,
+                  calculation_params: {
+                    ...settings.calculation_params,
+                    maxScore: parseFloat(e.target.value) || 0
                   }
                 })}
               />
@@ -706,10 +649,10 @@ export default function SettingsPage() {
                 min="1"
                 max="24"
                 value={settings.session_timeout.hours}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  session_timeout: { 
-                    hours: parseInt(e.target.value) || 8 
+                onChange={(e) => setSettings({
+                  ...settings,
+                  session_timeout: {
+                    hours: parseInt(e.target.value) || 8
                   }
                 })}
               />

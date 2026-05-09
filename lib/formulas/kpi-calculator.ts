@@ -225,9 +225,11 @@ export function calculatePIR(
   return remainingPool.div(totalScores);
 }
 
+import { getTERCategory, getTERRate } from './ter-lookup';
+
 /**
  * Calculate PPh 21 using TER (Tarif Efektif Rata-rata) method
- * Based on Indonesian tax regulation
+ * Based on Indonesian tax regulation PP 58/2023
  */
 export function calculatePPh21TER(
   grossIncome: number,
@@ -235,21 +237,15 @@ export function calculatePPh21TER(
 ): Decimal {
   const gross = new Decimal(grossIncome);
 
-  // TER rates based on tax status (simplified version)
-  // In production, use official TER table from DJP
-  const terRates: Record<string, number> = {
-    'TK/0': 5,    // 5%
-    'TK/1': 4.5,  // 4.5%
-    'TK/2': 4,    // 4%
-    'TK/3': 3.5,  // 3.5%
-    'K/0': 4.5,   // 4.5%
-    'K/1': 4,     // 4%
-    'K/2': 3.5,   // 3.5%
-    'K/3': 3,     // 3%
-  };
+  if (gross.lessThanOrEqualTo(0)) return new Decimal(0);
 
-  const rate = terRates[taxStatus] || 5;
-  const taxRate = new Decimal(rate).div(100);
+  // Get TER Category based on PTKP status
+  const category = getTERCategory(taxStatus);
+
+  // Get TER Rate based on Category and monthly gross income
+  const ratePercentage = getTERRate(category, grossIncome);
+
+  const taxRate = new Decimal(ratePercentage).div(100);
 
   return gross.mul(taxRate);
 }

@@ -71,6 +71,13 @@ const formatCurrency = (val: number) =>
 // Sub-components
 // ────────────────────────────────────────────────────────────────
 
+const safeRender = (val: any) => {
+  if (val && typeof val === 'object') {
+    return JSON.stringify(val)
+  }
+  return val
+}
+
 function ReportTypeCard({
   report,
   selected,
@@ -178,10 +185,10 @@ function KPIAchievementTable({ data }: { data: any[] }) {
       <tbody>
         {data.map((row: any, idx: number) => (
           <tr key={idx} className="hover:bg-gray-50">
-            <td className="border p-2 font-medium">{row.employee_name || row.unit_name}</td>
-            <td className="border p-2">{row.indicator}</td>
-            <td className="border p-2 text-right">{row.weight}</td>
-            <td className="border p-2 text-right font-bold text-blue-700">{row.achievement_percentage}</td>
+            <td className="border p-2 font-medium">{safeRender(row.employee_name || row.unit_name)}</td>
+            <td className="border p-2">{safeRender(row.indicator || row.indicator_name)}</td>
+            <td className="border p-2 text-right">{safeRender(row.weight)}</td>
+            <td className="border p-2 text-right font-bold text-blue-700">{safeRender(row.achievement_percentage)}</td>
           </tr>
         ))}
       </tbody>

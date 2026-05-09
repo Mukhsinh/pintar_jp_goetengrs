@@ -6,33 +6,28 @@ import * as fs from 'fs'
 
 const OMIT_KEYS = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
+import { getTERCategory, getTERRate } from '@/lib/formulas/ter-lookup'
+
 /**
- * PPh 21 Progressive Tax Calculator (UU HPP)
- * Calculates monthly tax based on annualized gross income.
+ * PPh 21 Tax Calculator (TER - PP 58/2023)
+ * Calculates monthly tax based on TER categories and gross income.
  * ASN with Final tax type: 0% (exempt)
- * BLUD/Non-ASN: Progressive rates applied
  */
-function calculatePPh21(monthlyGross: number, employeeStatus?: string, taxType?: string): number {
+function calculatePPh21(monthlyGross: number, employeeStatus?: string, taxType?: string, taxStatus: string = 'TK/0'): number {
   // ASN with Final tax → exempt
   if (employeeStatus === 'ASN' && taxType === 'Final') return 0
   if (monthlyGross <= 0) return 0
 
-  const annualGross = monthlyGross * 12
+  // Get TER Category based on PTKP status
+  const category = getTERCategory(taxStatus)
 
-  // Progressive tax brackets (UU HPP)
-  let annualTax = 0
-  if (annualGross <= 60_000_000) {
-    annualTax = annualGross * 0.05
-  } else if (annualGross <= 250_000_000) {
-    annualTax = 60_000_000 * 0.05 + (annualGross - 60_000_000) * 0.15
-  } else if (annualGross <= 500_000_000) {
-    annualTax = 60_000_000 * 0.05 + 190_000_000 * 0.15 + (annualGross - 250_000_000) * 0.25
-  } else {
-    annualTax = 60_000_000 * 0.05 + 190_000_000 * 0.15 + 250_000_000 * 0.25 + (annualGross - 500_000_000) * 0.30
-  }
+  // Get TER Rate based on Category and monthly gross income
+  const ratePercentage = getTERRate(category, monthlyGross)
 
-  // Return monthly portion
-  return Math.round(annualTax / 12)
+  // Calculate Tax
+  const taxAmount = (monthlyGross * ratePercentage) / 100
+
+  return Math.round(taxAmount)
 }
 
 /**
@@ -147,11 +142,11 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
     .eq('period', period)
     .maybeSingle()
 
-  if (poolError) {
-    console.error('Error fetching pool data:', poolError)
+  if (!poolData) {
+    throw new Error(`Data pool tidak ditemukan untuk periode ${period}. Silakan buat data pool terlebih dahulu di menu Pengaturan Pool.`);
   }
 
-  const netPool = poolData?.net_pool || 0
+  const netPool = Number(poolData.net_pool || 0);
 
   const { data: allEmployees, error: allEmpError } = await supabase
     .from('m_employees')
@@ -339,12 +334,10 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
     } else {
       // STANDARD Style (Non-Medical) with Activity deduction:
       // PIR = (AllocatedForUnit - TotalActivityValueUnit) / TotalSkorUnit
-      const remainingPool = allocatedForUnit - totalActivityValueUnit
-      pir = (totalSkorUnit > 0 && remainingPool > 0) ? remainingPool / totalSkorUnit : 0
-
-      const debugStr = `[DEBUG PIR] Unit: ${unitName} | Prop: ${unitProp} | Allocated: ${allocatedForUnit} | Activity: ${totalActivityValueUnit} | Remaining: ${remainingPool} | TotalScore: ${totalSkorUnit} | PIR: ${pir}\n`;
-      console.log(debugStr);
-      fs.appendFileSync('d:/Aplikasi Antigravity/JASPEL/pir_debug_log.txt', debugStr);
+      const remainingPool = allocatedForUnit - totalActivityValueUnit;
+      pir = (totalSkorUnit > 0) ? (remainingPool / totalSkorUnit) : 0;
+      // Allow slightly negative PIR if activities exceed allocation? Business logic check:
+      if (pir < 0) pir = 0;
     }
 
     unitPIRMap.set(uId, pir)
@@ -405,7 +398,7 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
     }
 
     // PPh 21
-    const taxAmount = calculatePPh21(grossIncentive, emp.employee_status, emp.tax_type)
+    const taxAmount = calculatePPh21(grossIncentive, emp.employee_status, emp.tax_type, emp.tax_status)
 
     // Insentif Netto = Bruto - Pajak
     const netIncentive = grossIncentive - taxAmount
@@ -435,23 +428,23 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
       tax_status: emp.tax_status || 'Non-PKP',
       employee_status: emp.employee_status || '-',
       tax_type: emp.tax_type || '-',
-      p1_score: p1.toFixed(2),
-      p2_score: p2.toFixed(2),
-      p3_score: p3.toFixed(2),
+      p1_score: p1,
+      p2_score: p2,
+      p3_score: p3,
       p1_weight: getCatWeight('P1'),
       p2_weight: getCatWeight('P2'),
       p3_weight: getCatWeight('P3'),
-      total_score: totalScore.toFixed(2),
-      pir_value: pir.toFixed(2),
-      total_activity: totalActivityRupiah.toFixed(2),
-      total_activity_rupiah: totalActivityRupiah.toFixed(2),
-      total_skor_unit: totalSkorUnit.toFixed(2),
-      unit_proportion: unitProp.toFixed(2),
-      unit_allocation: uId ? (netPool * (unitProp / 100)).toFixed(2) : '0.00',
-      unit_total_activity: uId ? (unitTotalActivityMap.get(uId) || 0).toFixed(2) : '0.00',
-      gross_incentive: grossIncentive.toFixed(2),
-      tax_amount: taxAmount.toFixed(2),
-      net_incentive: netIncentive.toFixed(2),
+      total_score: totalScore,
+      pir_value: pir,
+      total_activity: totalActivityRupiah,
+      total_activity_rupiah: totalActivityRupiah,
+      total_skor_unit: totalSkorUnit,
+      unit_proportion: unitProp,
+      unit_allocation: uId ? (netPool * (unitProp / 100)) : 0,
+      unit_total_activity: uId ? (unitTotalActivityMap.get(uId) || 0) : 0,
+      gross_incentive: grossIncentive,
+      tax_amount: taxAmount,
+      net_incentive: netIncentive,
       assessment_details: assessmentDetails,
     })
   }
@@ -608,8 +601,8 @@ async function generateUnitComparisonReport(supabase: any, period: string, unitI
     }
 
     const u = unitMap.get(uName)
-    u.total_score_sum += parseFloat(row.total_score || '0')
-    u.total_incentive_sum += parseFloat(row.net_incentive || '0')
+    u.total_score_sum += Number(row.total_score || 0)
+    u.total_incentive_sum += Number(row.net_incentive || 0)
     u.employee_count++
   })
 

@@ -164,9 +164,11 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
     const fmtRp = (val: number) => `Rp ${val.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
     const fmtNum = (val: number) => val.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-    const allocatedForUnit = slip.unitAllocation ? slip.unitAllocation : (slip.pirValue * slip.totalSkorUnit - (slip.unitTotalActivity || 0));
-    const unitActivity = slip.unitTotalActivity || 0;
+    const allocatedForUnit = typeof slip.unitAllocation === 'number' ? slip.unitAllocation : 0;
+    const unitActivity = typeof slip.unitTotalActivity === 'number' ? slip.unitTotalActivity : 0;
     const remainingForIndex = allocatedForUnit - unitActivity;
+    const pirValue = typeof slip.pirValue === 'number' ? slip.pirValue : 0;
+    const totalSkorUnit = typeof slip.totalSkorUnit === 'number' ? slip.totalSkorUnit : 0;
 
     yPos += 7
     doc.text(`Formula: PIR = ((Alokasi Dana Unit) - (Insentif Kuantitatif Unit)) / Total Skor Seluruh Pegawai di Unit`, 15, yPos)
@@ -175,20 +177,19 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
     doc.text(`: ${fmtNum(slip.unitProportion)}%`, 95, yPos)
     yPos += 5
     doc.text(`Alokasi Dana Unit (Awal)`, 20, yPos)
-    doc.text(`: ${fmtRp(allocatedForUnit)}`, 95, yPos)
+    doc.text(`: Rp ${fmtNum(allocatedForUnit)}`, 95, yPos)
     yPos += 5
     doc.text(`Pengurang Kuantitatif Unit`, 20, yPos)
-    doc.text(`: ${fmtRp(unitActivity)}`, 95, yPos)
+    doc.text(`: Rp ${fmtNum(unitActivity)}`, 95, yPos)
     yPos += 5
     doc.text(`Sisa Alokasi untuk Skor Indeks`, 20, yPos)
-    doc.text(`: ${fmtRp(remainingForIndex)}`, 95, yPos)
+    doc.text(`: Rp ${fmtNum(remainingForIndex)}`, 95, yPos)
     yPos += 5
     doc.text(`Total Skor Kolektif Unit`, 20, yPos)
-    doc.text(`: ${fmtNum(slip.totalSkorUnit)} poin`, 95, yPos)
-    yPos += 6
-    doc.setFont('helvetica', 'bold')
-    doc.text(`Nilai PIR (per 1 poin)`, 20, yPos)
-    doc.text(`: ${fmtRp(slip.pirValue)}`, 95, yPos)
+    doc.text(`: ${fmtNum(totalSkorUnit)}`, 95, yPos)
+    yPos += 5
+    doc.text(`Nilai PIR`, 20, yPos)
+    doc.text(`: Rp ${fmtNum(pirValue)}`, 95, yPos)
     yPos += 3
 
     // === PERHITUNGAN INSENTIF BRUTO ===
@@ -269,68 +270,37 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
       doc.text(`PTKP: ${slip.taxStatus}`, 15, yPos)
       yPos += 6
 
-      // Show bracket detail
-      doc.text(`Estimasi Penghasilan Bruto Tahunan (Bruto Bulan Ini × 12 bulan):`, 20, yPos)
+      // Determine TER Category
+      const ptkpStatus = (slip.taxStatus || 'TK/0').toUpperCase()
+      let terCategory = 'A'
+      if (['TK/2', 'TK/3', 'K/1', 'K/2'].includes(ptkpStatus)) terCategory = 'B'
+      else if (ptkpStatus === 'K/3') terCategory = 'C'
+
+      doc.text(`Metode: Tarif Efektif Rata-rata (TER) — PP 58/2023`, 20, yPos)
       yPos += 5
-      const annualGross = slip.grossIncentive * 12
-      doc.text(`= ${fmtRp(annualGross)} /tahun`, 23, yPos)
+      doc.text(`Kategori TER: ${terCategory} (berdasarkan PTKP ${ptkpStatus})`, 20, yPos)
       yPos += 6
 
-      doc.text(`Tarif Progresif PPh 21 (UU HPP):`, 20, yPos)
+      // Show the TER rate used
+      const terRate = slip.taxAmount > 0 && slip.grossIncentive > 0
+        ? ((slip.taxAmount / slip.grossIncentive) * 100)
+        : 0
+      const terRateStr = terRate > 0 ? terRate.toFixed(2) : '0'
+
+      doc.text(`Penghasilan Bruto Bulanan: ${fmtRp(slip.grossIncentive)}`, 20, yPos)
       yPos += 5
-      doc.setFontSize(8)
-      doc.text(`• s.d. Rp 60.000.000       → 5%`, 23, yPos); yPos += 4
-      doc.text(`• Rp 60.000.000 - 250.000.000  → 15%`, 23, yPos); yPos += 4
-      doc.text(`• Rp 250.000.000 - 500.000.000 → 25%`, 23, yPos); yPos += 4
-      doc.text(`• Di atas Rp 500.000.000       → 30%`, 23, yPos); yPos += 5
+      doc.text(`Tarif Efektif: ${terRateStr}%`, 20, yPos)
+      yPos += 6
 
       doc.setFontSize(9)
-      // Show computed values
-      let annualTax = 0
-      const lines: string[] = []
-      if (annualGross <= 60_000_000) {
-        annualTax = annualGross * 0.05
-        lines.push(`${fmtRp(annualGross)} × 5% = ${fmtRp(annualTax)}`)
-      } else if (annualGross <= 250_000_000) {
-        const t1 = 60_000_000 * 0.05
-        const t2 = (annualGross - 60_000_000) * 0.15
-        annualTax = t1 + t2
-        lines.push(`Rp 60.000.000 × 5% = ${fmtRp(t1)}`)
-        lines.push(`${fmtRp(annualGross - 60_000_000)} × 15% = ${fmtRp(t2)}`)
-      } else if (annualGross <= 500_000_000) {
-        const t1 = 60_000_000 * 0.05
-        const t2 = 190_000_000 * 0.15
-        const t3 = (annualGross - 250_000_000) * 0.25
-        annualTax = t1 + t2 + t3
-        lines.push(`Rp 60.000.000 × 5% = ${fmtRp(t1)}`)
-        lines.push(`Rp 190.000.000 × 15% = ${fmtRp(t2)}`)
-        lines.push(`${fmtRp(annualGross - 250_000_000)} × 25% = ${fmtRp(t3)}`)
-      } else {
-        const t1 = 60_000_000 * 0.05
-        const t2 = 190_000_000 * 0.15
-        const t3 = 250_000_000 * 0.25
-        const t4 = (annualGross - 500_000_000) * 0.30
-        annualTax = t1 + t2 + t3 + t4
-        lines.push(`Rp 60.000.000 × 5% = ${fmtRp(t1)}`)
-        lines.push(`Rp 190.000.000 × 15% = ${fmtRp(t2)}`)
-        lines.push(`Rp 250.000.000 × 25% = ${fmtRp(t3)}`)
-        lines.push(`${fmtRp(annualGross - 500_000_000)} × 30% = ${fmtRp(t4)}`)
-      }
+      doc.text(`Perhitungan PPh 21 Bulanan (TER):`, 20, yPos)
+      yPos += 5
+      doc.text(`  ${fmtRp(slip.grossIncentive)} × ${terRateStr}% = ${fmtRp(slip.taxAmount)}`, 23, yPos)
+      yPos += 6
 
-      doc.text(`Perhitungan Pajak Tahunan:`, 20, yPos)
-      yPos += 5
-      for (const line of lines) {
-        doc.text(`  ${line}`, 23, yPos)
-        yPos += 4
-      }
-      yPos += 2
       doc.setFont('helvetica', 'bold')
-      doc.text(`Total Pajak Tahunan`, 20, yPos)
-      doc.text(`: ${fmtRp(annualTax)}`, 85, yPos)
-      yPos += 5
-      const monthlyTax = Math.round(annualTax / 12)
-      doc.text(`Potongan Pajak per Bulan`, 20, yPos)
-      doc.text(`: ${fmtRp(monthlyTax)}`, 85, yPos)
+      doc.text(`Potongan PPh 21`, 20, yPos)
+      doc.text(`: ${fmtRp(slip.taxAmount)}`, 85, yPos)
     }
 
     // === INSENTIF NETTO ===

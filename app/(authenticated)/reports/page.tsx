@@ -106,30 +106,32 @@ function IncentiveTable({ data }: { data: any[] }) {
     <table className="w-full border-collapse text-sm">
       <thead>
         <tr className="bg-gray-100">
-          {['NIP/NIK', 'NIK', 'NAMA PEGAWAI', 'UNIT', 'BANK', 'P1', 'P2', 'P3', 'SKOR', 'PIR', 'GROSS', 'PAJAK', 'NET'].map(h => (
-            <th key={h} className={`border p-2 ${['P1', 'P2', 'P3', 'SKOR', 'PIR', 'GROSS', 'PAJAK', 'NET'].includes(h) ? 'text-right' : 'text-left'} font-semibold`}>{h}</th>
+          {['NIP/NIK', 'NAMA PEGAWAI', 'UNIT', 'P1', 'P2', 'P3', 'SKOR INDEKS', 'PIR', 'RUPIAH KUANTITATIF', 'GROSS', 'PAJAK', 'NET'].map(h => (
+            <th key={h} className={`border p-2 ${['P1', 'P2', 'P3', 'SKOR INDEKS', 'PIR', 'RUPIAH KUANTITATIF', 'GROSS', 'PAJAK', 'NET'].includes(h) ? 'text-right' : 'text-left'} font-semibold text-[10px]`}>{h}</th>
           ))}
         </tr>
       </thead>
       <tbody>
         {data.map((row: any, idx: number) => (
-          <tr key={idx} className="hover:bg-gray-50">
+          <tr key={idx} className="hover:bg-gray-50 text-xs">
             <td className="border p-2 whitespace-nowrap">{row.employee_code || '-'}</td>
-            <td className="border p-2 whitespace-nowrap">{row.nik || '-'}</td>
             <td className="border p-2 font-medium min-w-[150px]">{row.employee_name}</td>
             <td className="border p-2 whitespace-nowrap">{row.unit}</td>
-            <td className="border p-2 text-xs">
-              <div className="font-semibold">{row.bank_name || '-'}</div>
-              <div className="text-gray-500">{row.bank_account_number || '-'}</div>
-            </td>
             <td className="border p-2 text-right">{(parseFloat(row.p1_score) || 0).toFixed(2)}</td>
             <td className="border p-2 text-right">{(parseFloat(row.p2_score) || 0).toFixed(2)}</td>
             <td className="border p-2 text-right">{(parseFloat(row.p3_score) || 0).toFixed(2)}</td>
             <td className="border p-2 text-right font-bold text-blue-700">{(parseFloat(row.total_score) || 0).toFixed(2)}</td>
-            <td className="border p-2 text-right whitespace-nowrap text-purple-600">{formatCurrency(parseFloat(row.pir_value) || 0)}</td>
-            <td className="border p-2 text-right whitespace-nowrap">{formatCurrency(parseFloat(row.gross_incentive) || 0)}</td>
-            <td className="border p-2 text-right whitespace-nowrap text-red-600">{formatCurrency(parseFloat(row.tax_amount) || 0)}</td>
-            <td className="border p-2 text-right font-bold text-green-700 whitespace-nowrap">{formatCurrency(parseFloat(row.net_incentive) || 0)}</td>
+            <td className="border p-2 text-right text-purple-600">{formatCurrency(parseFloat(row.pir_value) || 0)}</td>
+            <td className="border p-2 text-right font-semibold text-orange-600">
+              <div className="text-[10px] text-gray-400">Total Kuantitatif</div>
+              {formatCurrency(parseFloat(row.total_activity || row.total_activity_rupiah || 0))}
+            </td>
+            <td className="border p-2 text-right font-bold">
+              <div className="text-[10px] text-gray-400 font-normal">(Skor×PIR) + Kuantitatif</div>
+              {formatCurrency(parseFloat(row.gross_incentive) || 0)}
+            </td>
+            <td className="border p-2 text-right text-red-600">{formatCurrency(parseFloat(row.tax_amount) || 0)}</td>
+            <td className="border p-2 text-right font-bold text-green-700">{formatCurrency(parseFloat(row.net_incentive) || 0)}</td>
           </tr>
         ))}
       </tbody>

@@ -181,15 +181,33 @@ export default function AssessmentFormDialog({
   }
 
   const handleRealizationChange = (indicatorId: string, value: string, targetValue: number) => {
-    const realizationValue = parseFloat(value) || 0
-    const achievementPercentage = calculateAchievement(realizationValue, targetValue)
-    const score = calculateScore(achievementPercentage)
+    const indicator = categories.flatMap(c => c.indicators).find(i => i.id === indicatorId)
+    const category = categories.find(c => c.indicators.some(i => i.id === indicatorId))
+    const isActivity = category?.configuration_style === 'activity'
+
+    // For qualitative/regular, realizationValue is the input.
+    // For activity Medis without sub_indicators, realizationValue is the VOLUME input.
+    const inputRealization = parseFloat(value) || 0
+
+    let achievementPercentage = 0
+    let score = 0
+    let derivedRealizationValue = inputRealization
+
+    if (indicator && isMedicalUnit && isActivity) {
+      const tariff = parseFloat((indicator as any).basic_index_value?.toString() || '0')
+      score = inputRealization * tariff
+      derivedRealizationValue = inputRealization // Store raw VOLUME as realization_value
+      achievementPercentage = 100
+    } else {
+      achievementPercentage = calculateAchievement(inputRealization, targetValue)
+      score = calculateScore(achievementPercentage)
+    }
 
     setAssessments(prev => ({
       ...prev,
       [indicatorId]: {
         indicator_id: indicatorId,
-        realization_value: realizationValue,
+        realization_value: derivedRealizationValue,
         achievement_percentage: achievementPercentage,
         score: score,
         notes: prev[indicatorId]?.notes || '',
@@ -221,34 +239,47 @@ export default function AssessmentFormDialog({
       // Find the indicator to get sub-indicator weights and target
       const indicator = categories.flatMap(c => c.indicators).find(i => i.id === indicatorId)
       let totalAchievement = 0
-      let derivedRealizationValue = 0
+      let isQuantitativeIndicator = false
+      let sumVolumes = 0
+      let sumScores = 0
 
       if (indicator && indicator.sub_indicators.length > 0) {
         // Bottom-up logic: Sum (Skor * Bobot)
-        let sumRealisasi = 0
         subAssessments.forEach(sub => {
           const subConfig = indicator.sub_indicators.find(s => s.id === sub.sub_indicator_id)
-          const weight = isMedicalUnit ? 1 : (subConfig ? (subConfig.weight_percentage / 100) : 0)
-          sumRealisasi += (sub.score || 0) * weight
+          if (subConfig?.measurement_type === 'quantitative') isQuantitativeIndicator = true
+
+          // For quantitative/activity, weight acts as 1 (so volume*tariff adds up directly)
+          const weight = (isMedicalUnit || isQuantitativeIndicator) ? 1 : (subConfig ? (subConfig.weight_percentage / 100) : 0)
+          sumScores += (sub.score || 0) * weight
+          sumVolumes += (sub.realization_value || 0)
         })
 
         const maxTarget = getIndicatorTarget(indicator)
 
-        derivedRealizationValue = sumRealisasi
-        totalAchievement = maxTarget > 0 ? (sumRealisasi / maxTarget) * 100 : (isMedicalUnit && sumRealisasi > 0 ? 100 : 0)
+        if (isQuantitativeIndicator || isMedicalUnit) {
+          totalAchievement = 100 // Placeholder visual
+        } else {
+          totalAchievement = maxTarget > 0 ? (sumScores / maxTarget) * 100 : 0
+        }
       } else {
         totalAchievement = current.achievement_percentage
-        derivedRealizationValue = current.realization_value
+        sumVolumes = current.realization_value
+        sumScores = current.score
+        const category = categories.find(c => c.indicators.some(i => i.id === indicatorId))
+        if (category?.configuration_style === 'activity') {
+          isQuantitativeIndicator = true
+        }
       }
 
       return {
         ...prev,
         [indicatorId]: {
           ...current,
-          realization_value: Number(derivedRealizationValue.toFixed(4)),
+          realization_value: Number(sumVolumes.toFixed(4)), // Store raw VOLUME SUM
           sub_assessments: subAssessments,
           achievement_percentage: Number(totalAchievement.toFixed(2)),
-          score: calculateScore(totalAchievement)
+          score: (isMedicalUnit || isQuantitativeIndicator) ? Number(sumScores.toFixed(4)) : calculateScore(totalAchievement)
         }
       }
     })
@@ -602,7 +633,7 @@ export default function AssessmentFormDialog({
                                           <p className="text-xs text-gray-500">
                                             {!isMedicalUnit && `Bobot: ${sub.weight_percentage}%`}
                                             {sub.target_value > 0 && ` • Target: ${sub.target_value}`}
-                                            {isQuantitative && sub.measurement_unit && ` • Satuan: ${sub.measurement_unit}`}
+                                            {isQuantitative && ` • Satuan: ${sub.measurement_unit || 'Volume'} • Tarif Dasar: Rp ${(sub.base_index_value || 0).toLocaleString('id-ID')}`}
                                           </p>
                                         </div>
                                         <Badge variant="outline" className="bg-white text-xs">
@@ -694,15 +725,8 @@ export default function AssessmentFormDialog({
                                                   value={subRealization || ''}
                                                   onChange={(e) => {
                                                     const vol = parseFloat(e.target.value) || 0
-                                                    const category = categories.find(c => c.indicators.some(i => i.id === indicator.id))
-                                                    const isActivity = category?.configuration_style === 'activity'
-
-                                                    let calculatedScore = 0
-                                                    if (isActivity) {
-                                                      calculatedScore = vol * (sub.unit_tariff || 0)
-                                                    } else {
-                                                      calculatedScore = vol * (sub.base_index_value || 0)
-                                                    }
+                                                    const sTariff = sub.base_index_value || 0
+                                                    const calculatedScore = vol * sTariff
 
                                                     handleSubAssessmentChange(indicator.id, sub.id, vol, calculatedScore)
                                                   }}

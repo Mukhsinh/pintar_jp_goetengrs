@@ -306,7 +306,7 @@ export default function IndicatorFormDialog({
             {/* Basic Index Value (Only for Activity Style) */}
             {category?.configuration_style === 'activity' && (
               <div className="space-y-2">
-                <Label htmlFor="basic_index_value">Nilai Dasar Indeks *</Label>
+                <Label htmlFor="basic_index_value">Tarif Dasar / Nilai Indeks *</Label>
                 <Input
                   id="basic_index_value"
                   type="number"
@@ -320,7 +320,7 @@ export default function IndicatorFormDialog({
                   <p className="text-sm text-red-600">{errors.basic_index_value}</p>
                 )}
                 <p className="text-xs text-gray-500">
-                  Nilai dasar (basic index) per satuan aktivitas. Gunakan desimal hingga 4 angka (contoh: 0.1250).
+                  Nilai tarif pengali atau nilai indeks dasar (Activity-Based). Gunakan desimal hingga 4 angka (contoh: 0.1250).
                 </p>
               </div>
             )}

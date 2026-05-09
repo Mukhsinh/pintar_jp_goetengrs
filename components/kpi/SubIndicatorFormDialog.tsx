@@ -216,24 +216,33 @@ export default function SubIndicatorFormDialog({
             newErrors.target_value = 'Nilai target harus berupa angka'
         }
 
-        // Validate scoring criteria
-        if (formData.scoring_criteria.length === 0) {
-            newErrors.scoring_criteria = 'Minimal harus ada satu kriteria penilaian'
-        } else {
-            formData.scoring_criteria.forEach((criterion, index) => {
-                if (isNaN(criterion.score) || criterion.score < 0) {
-                    newErrors[`score_${index}`] = `Skor kriteria ${index + 1} harus berupa angka positif`
-                }
-                if (!criterion.label.trim()) {
-                    newErrors[`label_${index}`] = `Label kriteria ${index + 1} wajib diisi`
-                }
-            })
+        // Validate scoring criteria ONLY if measurement_type is scoring
+        if (formData.measurement_type === 'scoring') {
+            if (formData.scoring_criteria.length === 0) {
+                newErrors.scoring_criteria = 'Minimal harus ada satu kriteria penilaian'
+            } else {
+                formData.scoring_criteria.forEach((criterion, index) => {
+                    if (isNaN(criterion.score) || criterion.score < 0) {
+                        newErrors[`score_${index}`] = `Skor kriteria ${index + 1} harus berupa angka positif`
+                    }
+                    if (!criterion.label.trim()) {
+                        newErrors[`label_${index}`] = `Label kriteria ${index + 1} wajib diisi`
+                    }
+                })
 
-            // Check for duplicate scores
-            const scores = formData.scoring_criteria.map(c => c.score)
-            const duplicateScores = scores.filter((score, index) => scores.indexOf(score) !== index)
-            if (duplicateScores.length > 0) {
-                newErrors.scoring_criteria = 'Skor kriteria tidak boleh sama'
+                // Check for duplicate scores
+                const scores = formData.scoring_criteria.map(c => c.score)
+                const duplicateScores = scores.filter((score, index) => scores.indexOf(score) !== index)
+                if (duplicateScores.length > 0) {
+                    newErrors.scoring_criteria = 'Skor kriteria tidak boleh sama'
+                }
+            }
+        } else if (formData.measurement_type === 'quantitative') {
+            if (!formData.base_index_value || parseFloat(formData.base_index_value.toString()) <= 0) {
+                newErrors.base_index_value = 'Tarif Dasar / Nilai Indeks harus lebih besar dari 0'
+            }
+            if (isMedicalUnit && formData.service_types.length === 0) {
+                newErrors.service_types = 'Minimal harus ada satu jenis layanan yang dipilih'
             }
         }
 
@@ -390,54 +399,69 @@ export default function SubIndicatorFormDialog({
 
                         {formData.measurement_type === 'quantitative' && (
                             <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
-                                <div className="space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <Label className="font-bold flex items-center gap-2">
-                                            Jenis Layanan *
-                                        </Label>
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-7 text-xs"
-                                            onClick={() => {
-                                                if (formData.service_types.length === SERVICE_TYPES.length) {
-                                                    setFormData({ ...formData, service_types: [] })
-                                                } else {
-                                                    setFormData({ ...formData, service_types: [...SERVICE_TYPES] })
-                                                }
-                                            }}
-                                        >
-                                            {formData.service_types.length === SERVICE_TYPES.length ? 'Batal Semua' : 'Pilih Semua'}
-                                        </Button>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-white p-3 rounded border">
-                                        {SERVICE_TYPES.map((type) => (
-                                            <div key={type} className="flex items-center space-x-2">
-                                                <input
-                                                    type="checkbox"
-                                                    id={`st-${type}`}
-                                                    checked={formData.service_types.includes(type)}
-                                                    onChange={(e) => {
-                                                        const checked = e.target.checked
-                                                        const newTypes = checked
-                                                            ? [...formData.service_types, type]
-                                                            : formData.service_types.filter(t => t !== type)
-                                                        setFormData({ ...formData, service_types: newTypes })
-                                                    }}
-                                                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                                                />
-                                                <label htmlFor={`st-${type}`} className="text-xs text-gray-700 cursor-pointer">
-                                                    {type}
-                                                </label>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <p className="text-[10px] text-gray-500 italic">
-                                        Pilih layanan yang akan diintegrasikan dengan sub indikator ini. Pengisian volume dilakukan di penilaian.
-                                    </p>
+                                <div className="space-y-2">
+                                    <Label htmlFor="base_index_value">Tarif Dasar / Nilai Indeks *</Label>
+                                    <Input
+                                        id="base_index_value"
+                                        type="number"
+                                        step="any"
+                                        value={formData.base_index_value}
+                                        onChange={(e) => setFormData({ ...formData, base_index_value: e.target.value })}
+                                        placeholder="contoh: 150000 atau 0.8"
+                                    />
+                                    <p className="text-xs text-gray-500">Nilai tarif/indeks ini akan dikalikan dengan volume capaian.</p>
                                 </div>
+
+                                {isMedicalUnit && (
+                                    <div className="space-y-3 pt-2">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="font-bold flex items-center gap-2">
+                                                Jenis Layanan *
+                                            </Label>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 text-xs"
+                                                onClick={() => {
+                                                    if (formData.service_types.length === SERVICE_TYPES.length) {
+                                                        setFormData({ ...formData, service_types: [] })
+                                                    } else {
+                                                        setFormData({ ...formData, service_types: [...SERVICE_TYPES] })
+                                                    }
+                                                }}
+                                            >
+                                                {formData.service_types.length === SERVICE_TYPES.length ? 'Batal Semua' : 'Pilih Semua'}
+                                            </Button>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-white p-3 rounded border">
+                                            {SERVICE_TYPES.map((type) => (
+                                                <div key={type} className="flex items-center space-x-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        id={`st-${type}`}
+                                                        checked={formData.service_types.includes(type)}
+                                                        onChange={(e) => {
+                                                            const checked = e.target.checked
+                                                            const newTypes = checked
+                                                                ? [...formData.service_types, type]
+                                                                : formData.service_types.filter(t => t !== type)
+                                                            setFormData({ ...formData, service_types: newTypes })
+                                                        }}
+                                                        className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                                                    />
+                                                    <label htmlFor={`st-${type}`} className="text-xs text-gray-700 cursor-pointer">
+                                                        {type}
+                                                    </label>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <p className="text-[10px] text-gray-500 italic">
+                                            Pilih layanan yang akan diintegrasikan dengan sub indikator ini. Pengisian volume dilakukan di penilaian.
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

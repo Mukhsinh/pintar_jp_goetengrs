@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { isMedicalUnit } from '@/lib/utils/medical-unit'
+import ExcelJS from 'exceljs'
+import * as fs from 'fs'
+
+const OMIT_KEYS = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
 /**
  * PPh 21 Progressive Tax Calculator (UU HPP)
@@ -177,9 +181,14 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
       realization_value,
       target_value,
       m_kpi_indicators!inner (
+        name,
+        weight_percentage,
+        basic_index_value,
+        target_value,
         m_kpi_categories!inner (
           category,
-          weight_percentage
+          weight_percentage,
+          configuration_style
         )
       )
     `)
@@ -192,53 +201,102 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
 
   if (!allEmployees) return []
 
-  // --- Helper: Calculate total score for an employee ---
-  const calcEmployeeTotalScore = (empId: string) => {
+  // --- Helper: Calculate total score/activity for an employee ---
+  const calcEmployeeTotalScore = (empId: string, isMedicalUnit: boolean) => {
     const empAssessments = allAssessments?.filter((a: any) => a.employee_id === empId) || []
+    let totalActivityRupiah = 0
+    const assessmentDetails: any[] = []
 
     const calcCategoryScore = (categoryName: string) => {
       const catAssessments = empAssessments.filter((a: any) => a.m_kpi_indicators?.m_kpi_categories?.category === categoryName)
       if (catAssessments.length === 0) return 0
 
-      const categoryWeight = parseFloat(catAssessments[0].m_kpi_indicators.m_kpi_categories.weight_percentage) || 0
+      // Weights and styles are category-specific. We use the first one found for this category.
+      const catMeta = catAssessments[0].m_kpi_indicators.m_kpi_categories
+      const categoryWeight = parseFloat(catMeta.weight_percentage) || 0
+      const isActivityStyle = catMeta.configuration_style === 'activity'
 
       let totalRealisasi = 0
       let totalTarget = 0
 
       for (const a of catAssessments) {
+        const indRealization = parseFloat(a.realization_value) || 0
+        const basicVal = parseFloat(a.m_kpi_indicators?.basic_index_value) || 0
+        const indicatorScore = parseFloat(a.score) || 0
+        const indName = a.m_kpi_indicators?.name || '-'
         const indWeight = parseFloat(a.weight_percentage) || 0
-        const indRealisasi = parseFloat(a.realization_value) || 0
         const indTarget = parseFloat(a.target_value) || 100
 
-        totalRealisasi += indRealisasi * (indWeight / 100)
-        totalTarget += indTarget * (indWeight / 100)
+        // Track detail for slip
+        assessmentDetails.push({
+          name: indName,
+          category: categoryName,
+          weight: indWeight,
+          target: indTarget,
+          realization: indRealization,
+          score: indicatorScore,
+          basic_value: basicVal,
+          is_activity: isActivityStyle || basicVal > 0
+        })
+
+        // Hybrid detection: if category is 'activity' OR indicator has a basic_index_value (Tarif)
+        if (isActivityStyle || basicVal > 0) {
+          // The `score` field in t_kpi_assessments already stores the correct 
+          // calculated value (Volume × Tariff) from the assessment form.
+          // We use it directly to avoid double-multiplication errors.
+          totalActivityRupiah += indicatorScore
+        } else if (isMedicalUnit) {
+          totalRealisasi += indRealization
+        } else {
+          const indWeight = parseFloat(a.weight_percentage) || 0
+          const indTarget = parseFloat(a.target_value) || 100
+          totalRealisasi += indRealization * (indWeight / 100)
+          totalTarget += indTarget * (indWeight / 100)
+        }
       }
 
-      if (totalTarget > 0) {
+      if (isActivityStyle) {
+        return 0 // Activity style categories don't contribute to index scores
+      }
+
+      if (isMedicalUnit) {
+        return totalRealisasi
+      } else if (totalTarget > 0) {
         return (totalRealisasi / totalTarget) * categoryWeight
       }
       return 0
     }
 
-    const p1 = calcCategoryScore('P1')
-    const p2 = calcCategoryScore('P2')
-    const p3 = calcCategoryScore('P3')
-    return { p1, p2, p3, total: p1 + p2 + p3, count: empAssessments.length }
+    const p1 = Number(calcCategoryScore('P1').toFixed(2))
+    const p2 = Number(calcCategoryScore('P2').toFixed(2))
+    const p3 = Number(calcCategoryScore('P3').toFixed(2))
+
+    return {
+      p1, p2, p3,
+      totalScore: Number((p1 + p2 + p3).toFixed(2)),
+      totalActivityRupiah,
+      assessmentDetails
+    }
   }
 
   // --- First pass: calculate ALL employee scores and unit totals ---
-  const employeeScoresMap = new Map<string, { emp: any; p1: number; p2: number; p3: number; total: number; count: number }>()
+  const employeeScoresMap = new Map<string, { emp: any; p1: number; p2: number; p3: number; totalScore: number; totalActivityRupiah: number; assessmentDetails: any[] }>()
   const unitTotalScoresMap = new Map<string, number>()
+  const unitTotalActivityMap = new Map<string, number>()
   const unitEmployeeCountMap = new Map<string, number>()
 
   for (const emp of allEmployees) {
     if (!emp.m_units) continue
-    const uId = Array.isArray(emp.m_units) ? emp.m_units[0]?.id : emp.m_units.id
-    const scores = calcEmployeeTotalScore(emp.id)
+    const unitData = Array.isArray(emp.m_units) ? emp.m_units[0] : emp.m_units
+    const uId = unitData?.id
+    const isMedical = isMedicalUnit(uId, unitData?.name)
+
+    const scores = calcEmployeeTotalScore(emp.id, isMedical)
 
     employeeScoresMap.set(emp.id, { emp, ...scores })
 
-    unitTotalScoresMap.set(uId, (unitTotalScoresMap.get(uId) || 0) + scores.total)
+    unitTotalScoresMap.set(uId, (unitTotalScoresMap.get(uId) || 0) + scores.totalScore)
+    unitTotalActivityMap.set(uId, (unitTotalActivityMap.get(uId) || 0) + scores.totalActivityRupiah)
     unitEmployeeCountMap.set(uId, (unitEmployeeCountMap.get(uId) || 0) + 1)
   }
 
@@ -260,24 +318,40 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
     const allocatedForUnit = netPool * (unitProp / 100)
 
     let pir = 0
+    const totalActivityValueUnit = unitTotalActivityMap.get(uId) || 0
+
     if (isMedical) {
-      // MEDIS Style PIR Calculation: (Allocated - Aggregate Guarantee Fees) / Total Activity Index Points
+      // MEDIS Style PIR Calculation: (Allocated - Aggregate Guarantee Fees - Total Activity Value) / Total Index Points
       const { data: masterDocs } = await supabase
         .from('remunerasi_master_dokter')
         .select('pagu_guarantee_fee')
       // Ideally we filter by employees in this unit
 
       const totalGuaranteeFee = masterDocs?.reduce((acc: number, d: any) => acc + Number(d.pagu_guarantee_fee), 0) || 0
-      const sisaPaguMedis = allocatedForUnit - totalGuaranteeFee
-      pir = totalSkorUnit > 0 ? sisaPaguMedis / totalSkorUnit : 0
+      const sisaPaguMedis = allocatedForUnit - totalGuaranteeFee - totalActivityValueUnit
+
+      // If sum of deductions exceeds allocated pool, standard handling
+      if (sisaPaguMedis <= 0) {
+        pir = 0
+      } else {
+        pir = totalSkorUnit > 0 ? sisaPaguMedis / totalSkorUnit : 0
+      }
     } else {
-      // Standard PIR: allocated / Total Skor
-      pir = totalSkorUnit > 0 ? allocatedForUnit / totalSkorUnit : 0
+      // STANDARD Style (Non-Medical) with Activity deduction:
+      // PIR = (AllocatedForUnit - TotalActivityValueUnit) / TotalSkorUnit
+      const remainingPool = allocatedForUnit - totalActivityValueUnit
+      pir = (totalSkorUnit > 0 && remainingPool > 0) ? remainingPool / totalSkorUnit : 0
+
+      const debugStr = `[DEBUG PIR] Unit: ${unitName} | Prop: ${unitProp} | Allocated: ${allocatedForUnit} | Activity: ${totalActivityValueUnit} | Remaining: ${remainingPool} | TotalScore: ${totalSkorUnit} | PIR: ${pir}\n`;
+      console.log(debugStr);
+      fs.appendFileSync('d:/Aplikasi Antigravity/JASPEL/pir_debug_log.txt', debugStr);
     }
 
     unitPIRMap.set(uId, pir)
 
     // Save audit trail (using original field names)
+    // Note: pir_value reflects the merit indices value, 
+    // allocated_for_unit is the RAW fund before deduction (to follow history pattern)
     await savePIRHistory(
       supabase, period, uId, unitName,
       netPool, unitProp, allocatedForUnit,
@@ -301,9 +375,9 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
   for (const [empId, data] of employeeScoresMap.entries()) {
     if (!reportEmployeeIds.has(empId)) continue
 
-    const { emp, p1, p2, p3, total: totalScore, count: empAssessmentsCount } = data
+    const { emp, p1, p2, p3, totalScore, totalActivityRupiah, assessmentDetails } = data
 
-    if (totalScore === 0 && empAssessmentsCount === 0) continue
+    if (totalScore === 0 && totalActivityRupiah === 0 && assessmentDetails.length === 0) continue
 
     const unitData = Array.isArray(emp.m_units) ? emp.m_units[0] : emp.m_units
     const uId = unitData?.id
@@ -313,10 +387,12 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
     const totalSkorUnit = uId ? (unitTotalScoresMap.get(uId) || 0) : 0
 
     const isMedical = isMedicalUnit(uId, unitName)
-    let grossIncentive = totalScore * pir
+
+    // Formula: (Total Skor x PIR) + Total Activity Rupiah
+    let grossIncentive = (totalScore * pir) + totalActivityRupiah
 
     if (isMedical) {
-      // For doctors, add Guarantee Fee (Guarantee Fee + Indexed Score Portion)
+      // For doctors, also add Guarantee Fee
       const { data: doctorMaster } = await supabase
         .from('remunerasi_master_dokter')
         .select('pagu_guarantee_fee')
@@ -339,6 +415,15 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
     const mappedBankAccount = emp.bank_account_number || emp.BANK_ACCOUNT_NUMBER || emp.nomor_rekening || '-'
     const mappedBankHolder = emp.bank_account_name || emp.BANK_ACCOUNT_NAME || emp.bank_account_holder || emp.full_name || '-'
 
+    // Extract category weights from assessmentDetails
+    const getCatWeight = (cat: string) => {
+      const detail = assessmentDetails.find((d: any) => d.category === cat)
+      if (!detail) return 0
+      // Get from the category metadata in allAssessments
+      const catAss = allAssessments?.find((a: any) => a.employee_id === empId && a.m_kpi_indicators?.m_kpi_categories?.category === cat)
+      return parseFloat(catAss?.m_kpi_indicators?.m_kpi_categories?.weight_percentage) || 0
+    }
+
     report.push({
       employee_code: emp.employee_code || '-',
       nik: mappedNik,
@@ -353,13 +438,21 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
       p1_score: p1.toFixed(2),
       p2_score: p2.toFixed(2),
       p3_score: p3.toFixed(2),
+      p1_weight: getCatWeight('P1'),
+      p2_weight: getCatWeight('P2'),
+      p3_weight: getCatWeight('P3'),
       total_score: totalScore.toFixed(2),
       pir_value: pir.toFixed(2),
+      total_activity: totalActivityRupiah.toFixed(2),
+      total_activity_rupiah: totalActivityRupiah.toFixed(2),
       total_skor_unit: totalSkorUnit.toFixed(2),
       unit_proportion: unitProp.toFixed(2),
+      unit_allocation: uId ? (netPool * (unitProp / 100)).toFixed(2) : '0.00',
+      unit_total_activity: uId ? (unitTotalActivityMap.get(uId) || 0).toFixed(2) : '0.00',
       gross_incentive: grossIncentive.toFixed(2),
       tax_amount: taxAmount.toFixed(2),
       net_incentive: netIncentive.toFixed(2),
+      assessment_details: assessmentDetails,
     })
   }
 
@@ -531,120 +624,84 @@ async function generateUnitComparisonReport(supabase: any, period: string, unitI
 
 /**
  * Generate Employee Slip Report
- * Dynamically calculating P1/P2/P3 breakdown and merging with incentive data.
+ * Uses enriched data from generateIncentiveReport including assessment_details and category weights.
  */
 async function generateEmployeeSlipReport(supabase: any, period: string, unitId?: string, employeeId?: string) {
-  // Reuse the dynamic total calculations
+  // Reuse the dynamic total calculations (now includes assessment_details & weights)
   const topLevelData = await generateIncentiveReport(supabase, period, unitId, employeeId)
-
-  // Fetch all assessments for this period to do the categorical breakdown
-  const { data: assessments } = await supabase
-    .from('t_kpi_assessments')
-    .select(`
-      employee_id,
-      realization_value,
-      target_value,
-      achievement_percentage,
-      score,
-      m_kpi_indicators!inner (
-        name,
-        target_value,
-        weight_percentage,
-        m_kpi_categories!inner (
-          category
-        )
-      )
-    `)
-    .eq('period', period)
-
-  if (!assessments) return []
 
   const results = []
 
-  // Create employee map for matching
-  let empQuery = supabase.from('m_employees').select('*')
-  if (unitId && unitId !== 'all') empQuery = empQuery.eq('unit_id', unitId)
-  if (employeeId && employeeId !== 'all') empQuery = empQuery.eq('id', employeeId)
-
-  const { data: employees } = await empQuery
-  const empMap = new Map()
-  employees?.forEach((e: any) => empMap.set(e.full_name, e))
-
   for (const row of topLevelData) {
-    const empRecord = empMap.get(row.employee_name)
-    const empId = empRecord?.id
-    const empAssessments = assessments.filter((a: any) => a.employee_id === empId)
+    const details: any[] = row.assessment_details || []
 
-    const p1Indicators = empAssessments.filter((i: any) => i.m_kpi_indicators.m_kpi_categories.category === 'P1')
-    const p2Indicators = empAssessments.filter((i: any) => i.m_kpi_indicators.m_kpi_categories.category === 'P2')
-    const p3Indicators = empAssessments.filter((i: any) => i.m_kpi_indicators.m_kpi_categories.category === 'P3')
+    // Use actual category weights from the data
+    const p1Weight = row.p1_weight || 0
+    const p2Weight = row.p2_weight || 0
+    const p3Weight = row.p3_weight || 0
 
-    const calcSum = (arr: any[]) => arr.reduce((sum, item) => sum + (parseFloat(item.score) || 0), 0)
-
-    const mapIndicator = (i: any) => {
-      const indWeight = parseFloat(i.m_kpi_indicators.weight_percentage) || 0
-      const achieve = parseFloat(i.achievement_percentage) || 0
-      const targetValue = parseFloat(i.target_value) || parseFloat(i.m_kpi_indicators.target_value) || 100
-
-      const real = parseFloat(i.realization_value) || 0
-      const indRealisasiWeight = real * (indWeight / 100)
-      const indTargetWeight = targetValue * (indWeight / 100)
-
-      let evalScore = 0
-      if (indTargetWeight > 0) {
-        evalScore = (indRealisasiWeight / indTargetWeight) * indWeight
-      }
-
-      return {
-        indicator: i.m_kpi_indicators.name,
-        target: targetValue.toFixed(2), // Real target score
-        weight: indWeight + '%',
-        achievement: achieve.toFixed(2) + '%',
-        score: evalScore.toFixed(2),
-      }
+    // Build breakdown from assessment_details
+    const buildBreakdown = (category: string) => {
+      return details
+        .filter((d: any) => d.category === category)
+        .map((d: any) => {
+          if (d.is_activity) {
+            const actRupiah = d.basic_value > 0 ? (d.realization * d.basic_value) : d.score
+            return {
+              indicator: d.name,
+              target: '-',
+              weight: d.weight + '%',
+              achievement: d.realization.toString(),
+              score: actRupiah.toFixed(2),
+              is_activity: true,
+              tarif: d.basic_value,
+            }
+          }
+          return {
+            indicator: d.name,
+            target: d.target.toFixed(2),
+            weight: d.weight + '%',
+            achievement: (d.target > 0 ? ((d.realization / d.target) * 100) : 0).toFixed(2) + '%',
+            score: d.score.toFixed(2),
+            is_activity: false,
+          }
+        })
     }
 
-    const mappedNik = empRecord?.nik || empRecord?.NIK || row.nik || '-'
-    const mappedBankName = empRecord?.bank_name || empRecord?.BANK_NAME || empRecord?.nama_bank || row.bank_name || '-'
-    const mappedBankAccount = empRecord?.bank_account_number || empRecord?.BANK_ACCOUNT_NUMBER || empRecord?.nomor_rekening || row.bank_account_number || '-'
-    const mappedBankHolder = empRecord?.bank_account_name || empRecord?.BANK_ACCOUNT_NAME || empRecord?.bank_account_holder || row.bank_account_holder || empRecord?.full_name || '-'
-
     results.push({
-      employee_code: row.employee_code || empRecord?.employee_code || '-',
-      nik: mappedNik,
+      employee_code: row.employee_code,
+      nik: row.nik,
       employee_name: row.employee_name,
       unit: row.unit || '-',
-      bank_name: mappedBankName,
-      bank_account_number: mappedBankAccount,
-      bank_account_holder: mappedBankHolder,
-      tax_status: row.tax_status || empRecord?.tax_status || 'Non-PKP',
-      employee_status: row.employee_status || empRecord?.employee_status || '-',
-      tax_type: row.tax_type || empRecord?.tax_type || '-',
-      p1_score: parseFloat(String(row.p1_score || '0')).toFixed(2),
-      p1_weighted: parseFloat(String(row.p1_score || '0')).toFixed(2),
-      p1_breakdown: p1Indicators.map(mapIndicator),
-      p2_score: parseFloat(String(row.p2_score || '0')).toFixed(2),
-      p2_weighted: parseFloat(String(row.p2_score || '0')).toFixed(2),
-      p2_breakdown: p2Indicators.map(mapIndicator),
-      p3_score: parseFloat(String(row.p3_score || '0')).toFixed(2),
-      p3_weighted: parseFloat(String(row.p3_score || '0')).toFixed(2),
-      p3_breakdown: p3Indicators.map(mapIndicator),
-      total_score: row.total_score || '0.00',
-      pir_value: row.pir_value || '0.00',
-      total_skor_unit: row.total_skor_unit || '0.00',
-      unit_proportion: row.unit_proportion || '0.00',
-      gross_incentive: parseFloat(row.gross_incentive).toLocaleString('id-ID', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-      tax_amount: parseFloat(row.tax_amount).toLocaleString('id-ID', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-      net_incentive: parseFloat(row.net_incentive).toLocaleString('id-ID', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
+      bank_name: row.bank_name,
+      bank_account_number: row.bank_account_number,
+      bank_account_holder: row.bank_account_holder,
+      tax_status: row.tax_status || 'Non-PKP',
+      employee_status: row.employee_status || '-',
+      tax_type: row.tax_type || '-',
+      p1_score: row.p1_score,
+      p1_weighted: row.p1_score,
+      p1_weight: p1Weight,
+      p1_breakdown: buildBreakdown('P1'),
+      p2_score: row.p2_score,
+      p2_weighted: row.p2_score,
+      p2_weight: p2Weight,
+      p2_breakdown: buildBreakdown('P2'),
+      p3_score: row.p3_score,
+      p3_weighted: row.p3_score,
+      p3_weight: p3Weight,
+      p3_breakdown: buildBreakdown('P3'),
+      total_score: row.total_score,
+      pir_value: row.pir_value,
+      total_activity: row.total_activity,
+      total_activity_rupiah: row.total_activity_rupiah,
+      total_skor_unit: row.total_skor_unit,
+      unit_proportion: row.unit_proportion,
+      unit_allocation: row.unit_allocation,
+      unit_total_activity: row.unit_total_activity,
+      gross_incentive: row.gross_incentive,
+      tax_amount: row.tax_amount,
+      net_incentive: row.net_incentive,
     })
   }
 

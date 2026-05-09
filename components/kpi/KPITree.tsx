@@ -333,23 +333,30 @@ const KPITree = memo(function KPITree({
                                             {(Number(sub.weight_percentage) || 0).toFixed(2)}%
                                           </span>
                                         </div>
-                                        {/* Score badges */}
+                                        {/* Score badges or Quantitative Info */}
                                         <div className="flex gap-1 mt-2 flex-wrap">
-                                          {sub.scoring_criteria?.map((criterion, idx) => (
-                                            <span
-                                              key={idx}
-                                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${idx === 0 ? 'bg-red-100 text-red-700 border-red-200' :
+                                          {sub.measurement_type === 'quantitative' ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs bg-indigo-50 text-indigo-700 border-indigo-200">
+                                              <span className="font-bold">Tarif Dasar: Rp {(Number(sub.base_index_value) || 0).toLocaleString('id-ID')}</span>
+                                              <span className="opacity-70">(Satuan: {sub.measurement_unit || 'Volume'})</span>
+                                            </span>
+                                          ) : (
+                                            sub.scoring_criteria?.map((criterion, idx) => (
+                                              <span
+                                                key={idx}
+                                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${idx === 0 ? 'bg-red-100 text-red-700 border-red-200' :
                                                   idx === 1 ? 'bg-orange-100 text-orange-700 border-orange-200' :
                                                     idx === 2 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
                                                       idx === 3 ? 'bg-blue-100 text-blue-700 border-blue-200' :
                                                         'bg-green-100 text-green-700 border-green-200'
-                                                }`}
-                                              title={criterion.label}
-                                            >
-                                              <span className="font-bold">{Number(criterion.score) || 0}</span>
-                                              <span className="opacity-70">({criterion.label})</span>
-                                            </span>
-                                          )) || []}
+                                                  }`}
+                                                title={criterion.label}
+                                              >
+                                                <span className="font-bold">{Number(criterion.score) || 0}</span>
+                                                <span className="opacity-70">({criterion.label})</span>
+                                              </span>
+                                            )) || []
+                                          )}
                                         </div>
                                         {sub.description && (
                                           <p className="text-xs text-gray-500 mt-1.5">{sub.description}</p>

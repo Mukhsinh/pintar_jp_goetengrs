@@ -18,6 +18,9 @@ interface IncentiveSlipData {
   p1Score: number
   p2Score: number
   p3Score: number
+  p1Weight: number
+  p2Weight: number
+  p3Weight: number
   p1Weighted: number
   p2Weighted: number
   p3Weighted: number
@@ -25,6 +28,9 @@ interface IncentiveSlipData {
   pirValue: number
   totalSkorUnit: number
   unitProportion: number
+  unitAllocation?: number
+  unitTotalActivity?: number
+  totalActivityRupiah: number
   grossIncentive: number
   taxAmount: number
   netIncentive: number
@@ -124,14 +130,18 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
     doc.text(`No. Rekening: ${slip.bankAccountNumber || '-'}`, rightX, 62)
     doc.text(`Nama Pemilik: ${slip.bankAccountHolder || '-'}`, rightX, 67)
 
-    // Summary Table
+    // Summary Table - use dynamic weights from KPI config
+    const p1w = slip.p1Weight || 0
+    const p2w = slip.p2Weight || 0
+    const p3w = slip.p3Weight || 0
+
     autoTable(doc, {
       startY: 80,
       head: [['Komponen Penilaian', 'Skor', 'Bobot (%)', 'Nilai Tertimbang']],
       body: [
-        ['P1 (Kinerja Utama/Posisi)', slip.p1Score.toFixed(2), '55%', slip.p1Weighted.toFixed(2)],
-        ['P2 (Kinerja Tambahan)', slip.p2Score.toFixed(2), '25%', slip.p2Weighted.toFixed(2)],
-        ['P3 (Perilaku/Potensi)', slip.p3Score.toFixed(2), '20%', slip.p3Weighted.toFixed(2)],
+        ['P1 (Kinerja Utama/Posisi)', slip.p1Score.toFixed(2), `${p1w}%`, slip.p1Weighted.toFixed(2)],
+        ['P2 (Kinerja Tambahan)', slip.p2Score.toFixed(2), `${p2w}%`, slip.p2Weighted.toFixed(2)],
+        ['P3 (Perilaku/Potensi)', slip.p3Score.toFixed(2), `${p3w}%`, slip.p3Weighted.toFixed(2)],
         [{ content: 'Total Skor Akhir', styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } }, '-', '-', { content: slip.finalScore.toFixed(2), styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } }],
       ],
       theme: 'grid',
@@ -154,23 +164,31 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
     const fmtRp = (val: number) => `Rp ${val.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
     const fmtNum = (val: number) => val.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-    const allocatedForUnit = slip.pirValue * slip.totalSkorUnit
+    const allocatedForUnit = slip.unitAllocation ? slip.unitAllocation : (slip.pirValue * slip.totalSkorUnit - (slip.unitTotalActivity || 0));
+    const unitActivity = slip.unitTotalActivity || 0;
+    const remainingForIndex = allocatedForUnit - unitActivity;
 
     yPos += 7
-    doc.text(`Formula: PIR = (Alokasi Dana Unit) / Total Skor Seluruh Pegawai di Unit`, 15, yPos)
+    doc.text(`Formula: PIR = ((Alokasi Dana Unit) - (Insentif Kuantitatif Unit)) / Total Skor Seluruh Pegawai di Unit`, 15, yPos)
     yPos += 5
     doc.text(`Proporsi Unit ${slip.unit}`, 20, yPos)
-    doc.text(`: ${fmtNum(slip.unitProportion)}%`, 85, yPos)
+    doc.text(`: ${fmtNum(slip.unitProportion)}%`, 95, yPos)
+    yPos += 5
+    doc.text(`Alokasi Dana Unit (Awal)`, 20, yPos)
+    doc.text(`: ${fmtRp(allocatedForUnit)}`, 95, yPos)
+    yPos += 5
+    doc.text(`Pengurang Kuantitatif Unit`, 20, yPos)
+    doc.text(`: ${fmtRp(unitActivity)}`, 95, yPos)
+    yPos += 5
+    doc.text(`Sisa Alokasi untuk Skor Indeks`, 20, yPos)
+    doc.text(`: ${fmtRp(remainingForIndex)}`, 95, yPos)
     yPos += 5
     doc.text(`Total Skor Kolektif Unit`, 20, yPos)
-    doc.text(`: ${fmtNum(slip.totalSkorUnit)} poin`, 85, yPos)
-    yPos += 5
-    doc.text(`Alokasi Dana Unit`, 20, yPos)
-    doc.text(`: ${fmtRp(allocatedForUnit)}`, 85, yPos)
+    doc.text(`: ${fmtNum(slip.totalSkorUnit)} poin`, 95, yPos)
     yPos += 6
     doc.setFont('helvetica', 'bold')
     doc.text(`Nilai PIR (per 1 poin)`, 20, yPos)
-    doc.text(`: ${fmtRp(slip.pirValue)}`, 85, yPos)
+    doc.text(`: ${fmtRp(slip.pirValue)}`, 95, yPos)
     yPos += 3
 
     // === PERHITUNGAN INSENTIF BRUTO ===
@@ -186,17 +204,38 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
 
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
-    doc.text(`Formula: Insentif Bruto = Total Skor Individu × PIR`, 15, yPos)
-    yPos += 5
-    doc.text(`Total Skor Anda`, 20, yPos)
-    doc.text(`: ${fmtNum(slip.finalScore)} poin`, 85, yPos)
-    yPos += 5
-    doc.text(`Nilai PIR`, 20, yPos)
-    doc.text(`: ${fmtRp(slip.pirValue)}`, 85, yPos)
+    doc.text(`Formula: Insentif Bruto = (Total Skor × PIR) + Insentif Kuantitatif Rupiah`, 15, yPos)
     yPos += 6
+
+    // B1. Index-based incentive
+    const indexIncentive = slip.finalScore * slip.pirValue
+    doc.setFont('helvetica', 'bold')
+    doc.text(`B1. Insentif Berbasis Skor Indeks`, 20, yPos)
+    yPos += 5
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Total Skor Anda`, 25, yPos)
+    doc.text(`: ${fmtNum(slip.finalScore)} poin`, 90, yPos)
+    yPos += 5
+    doc.text(`Nilai PIR`, 25, yPos)
+    doc.text(`: ${fmtRp(slip.pirValue)}`, 90, yPos)
+    yPos += 5
+    doc.text(`Insentif Skor`, 25, yPos)
+    doc.text(`: ${fmtNum(slip.finalScore)} × ${fmtRp(slip.pirValue)} = ${fmtRp(indexIncentive)}`, 90, yPos)
+    yPos += 7
+
+    // B2. Activity-based incentive
+    doc.setFont('helvetica', 'bold')
+    doc.text(`B2. Insentif Berbasis Kuantitatif Rupiah`, 20, yPos)
+    yPos += 5
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Total Kuantitatif Rupiah`, 25, yPos)
+    doc.text(`: ${fmtRp(slip.totalActivityRupiah)}`, 90, yPos)
+    yPos += 7
+
+    // B3. Total
     doc.setFont('helvetica', 'bold')
     doc.text(`Insentif Bruto`, 20, yPos)
-    doc.text(`: ${fmtRp(slip.grossIncentive)}`, 85, yPos)
+    doc.text(`: ${fmtRp(indexIncentive)} + ${fmtRp(slip.totalActivityRupiah)} = ${fmtRp(slip.grossIncentive)}`, 90, yPos)
     yPos += 3
 
     // === PERHITUNGAN PPh 21 ===
@@ -480,6 +519,11 @@ export async function exportToPDF(options: ReportExportOptions): Promise<Uint8Ar
         }
         return parseFloat(strVal) || 0
       }
+      // Use actual weights from data, fallback to defaults
+      const p1w = parseFloat(item.p1_weight) || 0
+      const p2w = parseFloat(item.p2_weight) || 0
+      const p3w = parseFloat(item.p3_weight) || 0
+
       return {
         period: options.period,
         employeeCode: item.employee_code || '-',
@@ -495,13 +539,19 @@ export async function exportToPDF(options: ReportExportOptions): Promise<Uint8Ar
         p1Score: parseFloat(item.p1_score) || 0,
         p2Score: parseFloat(item.p2_score) || 0,
         p3Score: parseFloat(item.p3_score) || 0,
-        p1Weighted: (parseFloat(item.p1_score) || 0) * 0.55,
-        p2Weighted: (parseFloat(item.p2_score) || 0) * 0.25,
-        p3Weighted: (parseFloat(item.p3_score) || 0) * 0.20,
+        p1Weight: p1w,
+        p2Weight: p2w,
+        p3Weight: p3w,
+        p1Weighted: parseFloat(item.p1_weighted || item.p1_score) || 0,
+        p2Weighted: parseFloat(item.p2_weighted || item.p2_score) || 0,
+        p3Weighted: parseFloat(item.p3_weighted || item.p3_score) || 0,
         finalScore: parseFloat(item.total_score) || 0,
         pirValue: parseNum(item.pir_value),
         totalSkorUnit: parseNum(item.total_skor_unit),
         unitProportion: parseNum(item.unit_proportion),
+        unitAllocation: parseNum(item.unit_allocation),
+        unitTotalActivity: parseNum(item.unit_total_activity),
+        totalActivityRupiah: parseNum(item.total_activity_rupiah || item.total_activity),
         grossIncentive: parseNum(item.gross_incentive),
         taxAmount: parseNum(item.tax_amount),
         netIncentive: parseNum(item.net_incentive),

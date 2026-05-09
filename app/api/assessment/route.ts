@@ -103,6 +103,8 @@ async function upsertAssessment(adminClient: any, assessment: Assessment): Promi
     realization_value: assessment.realization_value,
     target_value: assessment.target_value,
     weight_percentage: assessment.weight_percentage,
+    achievement_percentage: achievement,
+    score: score,
     notes: assessment.notes,
     assessor_id: assessment.assessor_id
   }
@@ -144,12 +146,40 @@ async function upsertAssessment(adminClient: any, assessment: Assessment): Promi
     result = data
   }
 
-  await logAssessmentAudit(
-    operation,
-    result.id,
-    `${operation === 'CREATE' ? 'Created' : 'Updated'} assessment for employee ${assessment.employee_id}`,
-    adminClient
-  )
+  // Handle Sub-Assessments if provided
+  if (assessment.sub_assessments && Array.isArray(assessment.sub_assessments)) {
+    for (const sub of assessment.sub_assessments) {
+      const subData = {
+        employee_id: assessment.employee_id,
+        indicator_id: assessment.indicator_id,
+        sub_indicator_id: sub.sub_indicator_id,
+        period: assessment.period,
+        realization_value: sub.realization_value || 0,
+        target_value: 0, // Not used for sub-indicators usually
+        weight_percentage: 0,
+        achievement_percentage: 100, // Placeholder
+        score: sub.score || 0,
+        notes: sub.notes || '',
+        assessor_id: assessment.assessor_id
+      }
+
+      // Check if sub-indicator assessment exists
+      const { data: subExisting } = await adminClient
+        .from('t_kpi_assessments')
+        .select('id')
+        .eq('employee_id', assessment.employee_id)
+        .eq('indicator_id', assessment.indicator_id)
+        .eq('sub_indicator_id', sub.sub_indicator_id)
+        .eq('period', assessment.period)
+        .maybeSingle()
+
+      if (subExisting) {
+        await adminClient.from('t_kpi_assessments').update(subData).eq('id', subExisting.id)
+      } else {
+        await adminClient.from('t_kpi_assessments').insert(subData)
+      }
+    }
+  }
 
   return result
 }

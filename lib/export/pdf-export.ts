@@ -34,6 +34,16 @@ interface IncentiveSlipData {
   grossIncentive: number
   taxAmount: number
   netIncentive: number
+  tax_mechanism_used?: string
+  ikg_score?: number
+  allocated_pool?: number
+  adjustment_value?: number
+  attendance_deduction?: number
+  other_deductions?: number
+  index_incentive?: number
+  guarantee_fee?: number
+  tax_detail?: string
+  pnsGrade?: string
 }
 
 function checkPageBreak(doc: any, yPos: number, neededHeight: number) {
@@ -115,20 +125,27 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
     doc.setFont('helvetica', 'normal')
 
     // Left column
-    doc.text(`Periode: ${slip.period || '-'}`, 15, 52)
-    doc.text(`Pegawai: ${slip.employeeName}`, 15, 57)
-    doc.text(`NIP/NIK: ${slip.employeeCode}`, 15, 62)
-    doc.text(`NIK: ${slip.nik || '-'}`, 15, 67)
-    doc.text(`Unit: ${slip.unit}`, 15, 72)
+    doc.setFont('helvetica', 'bold')
+    doc.text('INFORMASI PEGAWAI:', 15, 50)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Periode`, 17, 56); doc.text(`: ${slip.period || '-'}`, 50, 56)
+    doc.text(`Nama`, 17, 61); doc.text(`: ${slip.employeeName}`, 50, 61)
+    doc.text(`NIP/NIK`, 17, 66); doc.text(`: ${slip.employeeCode}`, 50, 66)
+    doc.text(`NIK`, 17, 71); doc.text(`: ${slip.nik || '-'}`, 50, 71)
+    doc.text(`Unit`, 17, 76); doc.text(`: ${slip.unit}`, 50, 76)
+    doc.text(`Status`, 17, 81); doc.text(`: ${slip.employeeStatus || '-'}`, 50, 81)
+    const displayGrade = (slip.pnsGrade && slip.pnsGrade !== '-' && slip.pnsGrade !== 'null') ? slip.pnsGrade : '-'
+    doc.text(`Golongan`, 17, 86); doc.text(`: ${displayGrade}`, 50, 86)
 
     // Right column (Bank Details)
-    const rightX = 120
+    const rightX = 115
     doc.setFont('helvetica', 'bold')
-    doc.text('INFORMASI PEMBAYARAN:', rightX, 52)
+    doc.text('INFORMASI PEMBAYARAN:', rightX, 50)
     doc.setFont('helvetica', 'normal')
-    doc.text(`Nama Bank: ${slip.bankName || '-'}`, rightX, 57)
-    doc.text(`No. Rekening: ${slip.bankAccountNumber || '-'}`, rightX, 62)
-    doc.text(`Nama Pemilik: ${slip.bankAccountHolder || '-'}`, rightX, 67)
+    doc.text(`Nama Bank`, rightX + 2, 56); doc.text(`: ${slip.bankName || '-'}`, rightX + 35, 56)
+    doc.text(`No. Rekening`, rightX + 2, 61); doc.text(`: ${slip.bankAccountNumber || '-'}`, rightX + 35, 61)
+    doc.text(`Nama Pemilik`, rightX + 2, 66); doc.text(`: ${slip.bankAccountHolder || '-'}`, rightX + 35, 66)
+
 
     // Summary Table - use dynamic weights from KPI config
     const p1w = slip.p1Weight || 0
@@ -136,7 +153,7 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
     const p3w = slip.p3Weight || 0
 
     autoTable(doc, {
-      startY: 80,
+      startY: 92,
       head: [['Komponen Penilaian', 'Skor', 'Bobot (%)', 'Nilai Tertimbang']],
       body: [
         ['P1 (Kinerja Utama/Posisi)', slip.p1Score.toFixed(2), `${p1w}%`, slip.p1Weighted.toFixed(2)],
@@ -159,9 +176,17 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
     doc.text('A. PERHITUNGAN PIR (Poin Indeks Rupiah)', 15, yPos + 1)
 
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
+    // Formatting helper
+    const formatCurrency = (num: number) =>
+      new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num)
 
-    const fmtRp = (val: number) => `Rp ${val.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+    const mechanism = slip.tax_mechanism_used || 'ter'
+    const isNoTax = mechanism === 'none'
+
+    // Header logic for "Tanpa Pajak"
+    const incentiveLabel = isNoTax ? "Insentif Bruto (Sebelum Pajak)" : "Insentif Bruto"
+
+    doc.setFontSize(9)
     const fmtNum = (val: number) => val.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
     const allocatedForUnit = typeof slip.unitAllocation === 'number' ? slip.unitAllocation : 0;
@@ -192,145 +217,49 @@ export async function generateIncentiveSlipPDF(data: IncentiveSlipData | Incenti
     doc.text(`: Rp ${fmtNum(pirValue)}`, 95, yPos)
     yPos += 3
 
-    // === PERHITUNGAN INSENTIF BRUTO ===
-    yPos = checkPageBreak(doc, yPos, 40)
-    yPos += 6
-    doc.setDrawColor(220, 220, 220)
-    doc.line(15, yPos - 3, doc.internal.pageSize.width - 15, yPos - 3)
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(10)
-    doc.text('B. PERHITUNGAN INSENTIF BRUTO', 15, yPos + 1)
-    yPos += 6
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    doc.text(`Formula: Insentif Bruto = (Total Skor × PIR) + Insentif Kuantitatif Rupiah`, 15, yPos)
-    yPos += 6
-
-    // B1. Index-based incentive
-    const indexIncentive = slip.finalScore * slip.pirValue
-    doc.setFont('helvetica', 'bold')
-    doc.text(`B1. Insentif Berbasis Skor Indeks`, 20, yPos)
-    yPos += 5
-    doc.setFont('helvetica', 'normal')
-    doc.text(`Total Skor Anda`, 25, yPos)
-    doc.text(`: ${fmtNum(slip.finalScore)} poin`, 90, yPos)
-    yPos += 5
-    doc.text(`Nilai PIR`, 25, yPos)
-    doc.text(`: ${fmtRp(slip.pirValue)}`, 90, yPos)
-    yPos += 5
-    doc.text(`Insentif Skor`, 25, yPos)
-    doc.text(`: ${fmtNum(slip.finalScore)} × ${fmtRp(slip.pirValue)} = ${fmtRp(indexIncentive)}`, 90, yPos)
-    yPos += 7
-
-    // B2. Activity-based incentive
-    doc.setFont('helvetica', 'bold')
-    doc.text(`B2. Insentif Berbasis Kuantitatif Rupiah`, 20, yPos)
-    yPos += 5
-    doc.setFont('helvetica', 'normal')
-    doc.text(`Total Kuantitatif Rupiah`, 25, yPos)
-    doc.text(`: ${fmtRp(slip.totalActivityRupiah)}`, 90, yPos)
-    yPos += 7
-
-    // B3. Total
-    doc.setFont('helvetica', 'bold')
-    doc.text(`Insentif Bruto`, 20, yPos)
-    doc.text(`: ${fmtRp(indexIncentive)} + ${fmtRp(slip.totalActivityRupiah)} = ${fmtRp(slip.grossIncentive)}`, 90, yPos)
-    yPos += 3
-
-    // === PERHITUNGAN PPh 21 ===
-    yPos = checkPageBreak(doc, yPos, 85)
-    yPos += 6
-    doc.setDrawColor(220, 220, 220)
-    doc.line(15, yPos - 3, doc.internal.pageSize.width - 15, yPos - 3)
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(10)
-    doc.text('C. PERHITUNGAN PPh 21', 15, yPos + 1)
-    yPos += 6
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-
-    const empStatusRaw = slip.employeeStatus ? slip.employeeStatus.toUpperCase() : '-'
-    const empTaxTypeRaw = slip.taxType ? slip.taxType.toUpperCase() : '-'
-
-    if (empStatusRaw === 'ASN' && empTaxTypeRaw === 'FINAL') {
-      doc.text(`Status Kepegawaian: ${empStatusRaw} | Jenis Pajak: ${empTaxTypeRaw}`, 15, yPos)
-      yPos += 5
-      doc.text(`PPh 21 Pegawai ASN dengan status Final: DIKECUALIKAN (0%)`, 20, yPos)
-      yPos += 6
-      doc.setFont('helvetica', 'bold')
-      doc.text(`Potongan PPh 21`, 20, yPos)
-      doc.text(`: Rp 0`, 85, yPos)
-    } else {
-      doc.text(`Status Kepegawaian: ${empStatusRaw === 'ACTIVE' ? 'PEGAWAI AKTIF' : empStatusRaw} | Jenis Pajak: ${empTaxTypeRaw}`, 15, yPos)
-      yPos += 5
-      doc.text(`PTKP: ${slip.taxStatus}`, 15, yPos)
-      yPos += 6
-
-      // Determine TER Category
-      const ptkpStatus = (slip.taxStatus || 'TK/0').toUpperCase()
-      let terCategory = 'A'
-      if (['TK/2', 'TK/3', 'K/1', 'K/2'].includes(ptkpStatus)) terCategory = 'B'
-      else if (ptkpStatus === 'K/3') terCategory = 'C'
-
-      doc.text(`Metode: Tarif Efektif Rata-rata (TER) — PP 58/2023`, 20, yPos)
-      yPos += 5
-      doc.text(`Kategori TER: ${terCategory} (berdasarkan PTKP ${ptkpStatus})`, 20, yPos)
-      yPos += 6
-
-      // Show the TER rate used
-      const terRate = slip.taxAmount > 0 && slip.grossIncentive > 0
-        ? ((slip.taxAmount / slip.grossIncentive) * 100)
-        : 0
-      const terRateStr = terRate > 0 ? terRate.toFixed(2) : '0'
-
-      doc.text(`Penghasilan Bruto Bulanan: ${fmtRp(slip.grossIncentive)}`, 20, yPos)
-      yPos += 5
-      doc.text(`Tarif Efektif: ${terRateStr}%`, 20, yPos)
-      yPos += 6
-
-      doc.setFontSize(9)
-      doc.text(`Perhitungan PPh 21 Bulanan (TER):`, 20, yPos)
-      yPos += 5
-      doc.text(`  ${fmtRp(slip.grossIncentive)} × ${terRateStr}% = ${fmtRp(slip.taxAmount)}`, 23, yPos)
-      yPos += 6
-
-      doc.setFont('helvetica', 'bold')
-      doc.text(`Potongan PPh 21`, 20, yPos)
-      doc.text(`: ${fmtRp(slip.taxAmount)}`, 85, yPos)
-    }
-
-    // === INSENTIF NETTO ===
-    yPos = checkPageBreak(doc, yPos, 35)
-    yPos += 7
-    doc.setDrawColor(44, 62, 80)
-    doc.setLineWidth(0.5)
-    doc.line(15, yPos - 2, doc.internal.pageSize.width - 15, yPos - 2)
-    doc.setLineWidth(0.2)
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(10)
-    doc.text('D. INSENTIF NETTO (DITERIMA)', 15, yPos + 3)
-    yPos += 9
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    doc.text(`Insentif Bruto`, 20, yPos)
-    doc.text(`: ${fmtRp(slip.grossIncentive)}`, 85, yPos)
-    yPos += 5
-    doc.text(`Potongan PPh 21`, 20, yPos)
-    doc.text(`: (${fmtRp(slip.taxAmount)})`, 85, yPos)
-    yPos += 2
-    doc.setDrawColor(150, 150, 150)
-    doc.line(85, yPos, 180, yPos)
-    yPos += 5
+    // === PERHITUNGAN INSENTIF ===
+    yPos = checkPageBreak(doc, yPos, 120)
+    yPos += 10
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(12)
-    doc.text(`INSENTIF NETTO`, 20, yPos)
-    doc.text(`: ${fmtRp(slip.netIncentive)}`, 85, yPos)
+    doc.text('PERHITUNGAN INSENTIF', 105, yPos, { align: 'center' })
+    yPos += 10
+
+    const tableRows: any[] = []
+    tableRows.push(['A.', incentiveLabel, ''])
+    tableRows.push(['', '1. Insentif Berbasis Indeks (Total Skor × PIR)', formatCurrency(slip.index_incentive || 0)])
+    tableRows.push(['', '2. Insentif Berbasis Aktivitas Kuantitatif', formatCurrency(slip.totalActivityRupiah || 0)])
+    if (slip.guarantee_fee && slip.guarantee_fee > 0) {
+      tableRows.push(['', '3. Guarantee Fee', formatCurrency(slip.guarantee_fee || 0)])
+    }
+    tableRows.push(['', '   Total Insentif Bruto', formatCurrency(slip.grossIncentive || 0)])
+    tableRows.push(['', '', ''])
+
+    let taxLabel = 'POTONGAN PAJAK PPh 21'
+    if (mechanism === 'none') {
+      taxLabel = 'PAJAK PPh 21 (Tanpa Potongan Pajak)'
+    } else if (mechanism === 'ter') {
+      taxLabel = 'POTONGAN PAJAK PPh 21 (Mekanisme TER PP 58/2023)'
+    } else if (mechanism === 'final_pp80') {
+      taxLabel = 'POTONGAN PAJAK PPh 21 (Mekanisme Final PP 80/2010)'
+    }
+
+    tableRows.push(['B.', taxLabel, ''])
+    tableRows.push(['', '1. PPh Pasal 21', formatCurrency(slip.taxAmount || 0)])
+    if (slip.tax_detail && slip.tax_detail !== '-') {
+      tableRows.push(['', `   (Detail: ${slip.tax_detail})`, ''])
+    }
+    tableRows.push(['', '', ''])
+
+    tableRows.push(['C.', isNoTax ? 'TOTAL YANG DITERIMA (SEBELUM PAJAK)' : 'TOTAL INSENTIF NETTO (TAKE HOME PAY)', formatCurrency(slip.netIncentive || 0)])
+
+    autoTable(doc, {
+      startY: yPos,
+      body: tableRows,
+      theme: 'striped',
+      styles: { fontSize: 9, cellPadding: 3 },
+      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 120 }, 2: { cellWidth: 50, halign: 'right' } }
+    })
 
     // Footer
     const pageHeight = doc.internal.pageSize.height
@@ -371,17 +300,102 @@ export async function generateSummaryReportPDF(
   let body = []
 
   if (reportType === 'kpi-achievement') {
-    head = [['No', 'Kategori', 'Indikator', 'Target', 'Realisasi', 'Capaian (%)', 'Nilai', 'Gap']]
-    body = results.map((r, i) => [
-      i + 1,
-      r.category,
-      r.indicator_name,
-      r.target_value,
-      r.realization_value,
-      r.achievement_percentage,
-      r.score,
-      r.gap
-    ])
+    const indexResults = results.filter(r => !r.is_activity)
+    const activityResults = results.filter(r => r.is_activity)
+
+    let currentY = 60
+
+    if (results.length > 0) {
+      const employeeName = results[0].employee_name || results[0].unit_name || '-';
+      doc.setFontSize(10);
+      doc.text(`Pegawai: ${employeeName}`, 15, 52);
+    }
+
+    // --- TABLE 1: KATEGORI BERBASIS INDEKS ---
+    if (indexResults.length > 0) {
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('--- KATEGORI BERBASIS INDEKS ---', 15, currentY);
+      currentY += 4;
+
+      autoTable(doc, {
+        startY: currentY,
+        head: [['No', 'Kategori', 'Indikator', 'Target', 'Realisasi', 'Capaian (%)', 'Nilai', 'Gap']],
+        body: indexResults.map((r, i) => [
+          i + 1,
+          r.category,
+          r.indicator_name,
+          r.target_value,
+          r.realization_value,
+          r.achievement_percentage,
+          r.score,
+          r.gap
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+        styles: { fontSize: 8 },
+        didParseCell: function (data) {
+          if (data.section === 'body' && data.column.index === 7) {
+            const gapVal = parseFloat(data.cell.raw as string);
+            if (gapVal > 0) {
+              data.cell.styles.textColor = [34, 197, 94];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (gapVal < 0) {
+              data.cell.styles.textColor = [239, 68, 68];
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        }
+      })
+
+      currentY = (doc as any).lastAutoTable.finalY + 10;
+
+      // Recap Table for Index Scores
+      let totalScore = 0;
+      for (const r of indexResults) {
+        totalScore += parseFloat(r.score || 0);
+      }
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Tabel Rekapitulasi Pencapaian (Indeks)', 15, currentY - 2);
+
+      autoTable(doc, {
+        startY: currentY,
+        head: [['Komponen', 'Deskripsi', 'Total Nilai']],
+        body: [
+          ['Total Pencapaian', `Total Nilai dari Keseluruhan Indikator Berbasis Indeks`, totalScore.toFixed(2)],
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+        styles: { fontSize: 9 }
+      })
+
+      currentY = (doc as any).lastAutoTable.finalY + 10;
+    }
+
+    // --- TABLE 2: KATEGORI BERBASIS AKTIVITAS ---
+    if (activityResults.length > 0) {
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('--- KATEGORI BERBASIS AKTIVITAS ---', 15, currentY);
+      currentY += 4;
+
+      autoTable(doc, {
+        startY: currentY,
+        head: [['No', 'Kategori', 'Indikator', 'Volume / Realisasi']],
+        body: activityResults.map((r, i) => [
+          i + 1,
+          r.category,
+          r.indicator_name,
+          r.realization_value
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+        styles: { fontSize: 8 }
+      })
+    }
+
   } else if (reportType === 'unit-comparison') {
     head = [['No', 'Unit', 'Rata-Rata Skor', 'Total Insentif', 'Jumlah Pegawai']]
     body = results.map((r, i) => [
@@ -391,6 +405,14 @@ export async function generateSummaryReportPDF(
       parseFloat(String(r.total_incentive)).toLocaleString('id-ID'),
       r.employee_count
     ])
+    autoTable(doc, {
+      startY: 50,
+      head,
+      body,
+      theme: 'grid',
+      headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+      styles: { fontSize: 8 }
+    })
   } else {
     // Default to incentive
     head = [['No', 'NIP/NIK', 'NIK', 'Nama Pegawai', 'Unit', 'P1', 'P2', 'P3', 'Skor Akhir', 'Insentif Bruto', 'Pajak', 'Insentif Neto']]
@@ -408,59 +430,13 @@ export async function generateSummaryReportPDF(
       parseFloat(String(r.tax_amount)).toLocaleString('id-ID'),
       parseFloat(String(r.net_incentive)).toLocaleString('id-ID')
     ])
-  }
-
-  // Draw main table
-  autoTable(doc, {
-    startY: reportType === 'kpi-achievement' ? 60 : 50,
-    head,
-    body,
-    theme: 'grid',
-    headStyles: { fillColor: [44, 62, 80], textColor: 255 },
-    styles: { fontSize: 8 },
-    didParseCell: function (data) {
-      if (reportType === 'kpi-achievement' && data.section === 'body' && data.column.index === 7) {
-        // Gap column color coding
-        const gapVal = parseFloat(data.cell.raw as string);
-        if (gapVal > 0) {
-          data.cell.styles.textColor = [34, 197, 94]; // Green
-          data.cell.styles.fontStyle = 'bold';
-        } else if (gapVal < 0) {
-          data.cell.styles.textColor = [239, 68, 68]; // Red
-          data.cell.styles.fontStyle = 'bold';
-        }
-      }
-    }
-  })
-
-  // Add Employee Name and Recap for KPI if specifically requested / or for all
-  if (reportType === 'kpi-achievement' && results.length > 0) {
-    const employeeName = results[0].employee_name || results[0].unit_name || '-';
-    doc.setFontSize(10);
-    doc.text(`Pegawai: ${employeeName}`, 15, 52);
-
-    let totalScore = 0;
-    // Simple sum of all scores for recap
-    for (const r of results) {
-      totalScore += parseFloat(r.score || 0);
-    }
-
-    const lastY = (doc as any).lastAutoTable.finalY + 10;
-
-    // Draw Recap Table
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Tabel Rekapitulasi Pencapaian', 15, lastY - 2);
-
     autoTable(doc, {
-      startY: lastY,
-      head: [['Komponen', 'Deskripsi', 'Total Nilai']],
-      body: [
-        ['Total Pencapaian', `Total Nilai dari Keseluruhan Indikator Pegawai/Unit`, totalScore.toFixed(2)],
-      ],
+      startY: 50,
+      head,
+      body,
       theme: 'grid',
       headStyles: { fillColor: [44, 62, 80], textColor: 255 },
-      styles: { fontSize: 9 }
+      styles: { fontSize: 8 }
     })
   }
 
@@ -522,9 +498,19 @@ export async function exportToPDF(options: ReportExportOptions): Promise<Uint8Ar
         unitAllocation: parseNum(item.unit_allocation),
         unitTotalActivity: parseNum(item.unit_total_activity),
         totalActivityRupiah: parseNum(item.total_activity_rupiah || item.total_activity),
+        index_incentive: parseNum(item.index_incentive),
+        guarantee_fee: parseNum(item.guarantee_fee),
         grossIncentive: parseNum(item.gross_incentive),
         taxAmount: parseNum(item.tax_amount),
         netIncentive: parseNum(item.net_incentive),
+        tax_mechanism_used: item.tax_mechanism_used,
+        tax_detail: item.tax_detail || '-',
+        pnsGrade: item.pns_grade || '-',
+        ikg_score: parseNum(item.ikg_score),
+        allocated_pool: parseNum(item.allocated_pool),
+        adjustment_value: parseNum(item.adjustment_value),
+        attendance_deduction: parseNum(item.attendance_deduction),
+        other_deductions: parseNum(item.other_deductions),
       }
     })
     return await generateIncentiveSlipPDF(slips)

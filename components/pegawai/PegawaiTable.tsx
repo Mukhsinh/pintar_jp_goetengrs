@@ -75,19 +75,32 @@ export const PegawaiTable = memo(function PegawaiTable({ pegawai, loading, onEdi
             <th className="text-left p-3">Nama Lengkap</th>
             <th className="text-left p-3">Unit</th>
             <th className="text-left p-3">Jabatan</th>
+            <th className="text-left p-3">Status</th>
+            <th className="text-left p-3">Golongan</th>
             <th className="text-left p-3">Status Pajak</th>
             <th className="text-left p-3">Telepon</th>
-            <th className="text-left p-3">Status</th>
+            <th className="text-left p-3">Aktif</th>
             <th className="text-right p-3">Aksi</th>
           </tr>
         </thead>
         <tbody>
           {pegawai.map((p) => (
-            <tr key={p.id} className="border-b hover:bg-gray-50">
+            <tr key={p.id} className="border-b hover:bg-gray-50 text-sm">
               <td className="p-3 font-medium">{p.employee_code}</td>
               <td className="p-3">{p.full_name}</td>
               <td className="p-3">{p.m_units?.name || '-'}</td>
               <td className="p-3">{p.position || '-'}</td>
+              <td className="p-3">
+                <span className={`px-2 py-1 text-xs rounded-full ${p.employment_status === 'PNS' ? 'bg-purple-100 text-purple-800' :
+                  p.employment_status === 'PPPK' ? 'bg-green-100 text-green-800' :
+                    'bg-orange-100 text-orange-800'
+                  }`}>
+                  {p.employment_status || '-'}
+                </span>
+              </td>
+              <td className="p-3">
+                {p.employment_status === 'PNS' && p.pns_grade && p.pns_grade !== 'null' ? `Golongan ${p.pns_grade}` : '-'}
+              </td>
               <td className="p-3">
                 <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
                   {p.tax_status}

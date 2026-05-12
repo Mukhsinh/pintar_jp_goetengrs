@@ -137,9 +137,10 @@ export interface Database {
           role?: 'superadmin' | 'unit_manager' | 'employee'
           email?: string
           tax_status: string
-          employee_status: 'ASN' | 'BLUD'
-          tax_type: 'Final' | 'TER'
-          pns_grade: number
+          employment_status: "PNS" | "PPPK" | "BLUD" | null
+          employee_status: string | null
+          tax_type: string | null
+          pns_grade: string | null
           is_active: boolean
           created_at: string
           updated_at: string
@@ -602,9 +603,10 @@ export interface Pegawai {
   unit_id: string
   position?: string | null
   tax_status: string
-  employee_status: 'ASN' | 'BLUD'
-  tax_type: 'Final' | 'TER'
-  pns_grade: number
+  employment_status: string | null
+  employee_status?: string | null
+  tax_type?: string | null
+  pns_grade: string | null
   phone?: string | null
   nik?: string | null
   bank_name?: string | null
@@ -625,14 +627,16 @@ export interface CreatePegawaiData {
   unit_id: string
   position?: string | null
   tax_status?: string
-  employee_status?: 'ASN' | 'BLUD'
-  tax_type?: 'Final' | 'TER'
-  pns_grade?: number
+  employment_status?: string | null
+  employee_status?: string | null
+  tax_type?: string | null
+  pns_grade?: string | null
   phone?: string | null
   nik?: string | null
   bank_name?: string | null
   bank_account_number?: string | null
   bank_account_name?: string | null
+  is_active?: boolean
 }
 
 export interface UpdatePegawaiData {
@@ -641,9 +645,10 @@ export interface UpdatePegawaiData {
   unit_id?: string
   position?: string | null
   tax_status?: string
-  employee_status?: 'ASN' | 'BLUD'
-  tax_type?: 'Final' | 'TER'
-  pns_grade?: number
+  employment_status?: string | null
+  employee_status?: string | null
+  tax_type?: string | null
+  pns_grade?: string | null
   phone?: string | null
   nik?: string | null
   bank_name?: string | null

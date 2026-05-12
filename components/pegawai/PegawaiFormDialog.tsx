@@ -5,9 +5,16 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createPegawai, updatePegawai } from '@/lib/services/pegawai.service'
+import { createPegawai, updatePegawai } from '@/app/(authenticated)/pegawai/actions'
 import { createClient } from '@/lib/supabase/client'
 import { Loader2 } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
 import type { Pegawai } from '@/lib/types/database.types'
 
 interface PegawaiFormDialogProps {
@@ -30,8 +37,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
     full_name: '',
     unit_id: '',
     tax_status: 'TK/0',
-    employee_status: 'ASN',
-    tax_type: 'TER',
+    employment_status: 'ASN',
     pns_grade: 3,
     position: '',
     phone: '',
@@ -40,7 +46,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
     bank_account_number: '',
     bank_account_name: '',
   })
-  
+
   // Load units
   useEffect(() => {
     const loadUnits = async () => {
@@ -50,17 +56,17 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
         .select('id, name')
         .eq('is_active', true)
         .order('name')
-      
+
       if (data) {
         setUnits(data)
       }
     }
-    
+
     if (open) {
       loadUnits()
     }
   }, [open])
-  
+
   // Populate form when editing
   useEffect(() => {
     if (pegawai) {
@@ -69,9 +75,8 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
         full_name: pegawai.full_name,
         unit_id: pegawai.unit_id,
         tax_status: pegawai.tax_status,
-        employee_status: (pegawai as any).employee_status || 'ASN',
-        tax_type: (pegawai as any).tax_type || 'TER',
-        pns_grade: (pegawai as any).pns_grade || 3,
+        employment_status: pegawai.employment_status || (pegawai.employee_status as any === 'active' ? 'ASN' : (pegawai.employee_status as any || 'ASN')),
+        pns_grade: pegawai.pns_grade ? parseInt(String(pegawai.pns_grade)) : 3,
         position: pegawai.position || '',
         phone: pegawai.phone || '',
         nik: pegawai.nik || '',
@@ -85,8 +90,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
         full_name: '',
         unit_id: '',
         tax_status: 'TK/0',
-        employee_status: 'ASN',
-        tax_type: 'TER',
+        employment_status: 'ASN',
         pns_grade: 3,
         position: '',
         phone: '',
@@ -97,29 +101,29 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
       })
     }
   }, [pegawai, open])
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     // Validation
     if (!formData.employee_code || !formData.full_name || !formData.unit_id) {
       alert('Kode pegawai, nama lengkap, dan unit wajib diisi')
       return
     }
-    
+
     setLoading(true)
-    
+
     let result
     if (pegawai) {
       // Update existing pegawai
-      result = await updatePegawai(pegawai.id, formData)
+      result = await updatePegawai(pegawai.id, formData as any)
     } else {
       // Create new pegawai
-      result = await createPegawai(formData)
+      result = await createPegawai(formData as any)
     }
-    
+
     setLoading(false)
-    
+
     if (result.success) {
       alert(pegawai ? 'Pegawai berhasil diperbarui' : 'Pegawai berhasil ditambahkan')
       onSuccess()
@@ -127,7 +131,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
       alert(`Gagal: ${result.error}`)
     }
   }
-  
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -137,7 +141,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
             {pegawai ? 'Perbarui informasi pegawai' : 'Tambahkan pegawai baru ke sistem'}
           </DialogDescription>
         </DialogHeader>
-        
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -151,7 +155,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
                 required
               />
             </div>
-            
+
             <div>
               <Label htmlFor="full_name">Nama Lengkap *</Label>
               <Input
@@ -164,7 +168,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
               />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="unit_id">Unit *</Label>
@@ -184,76 +188,76 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
                 ))}
               </select>
             </div>
-            
-            <div>
-              <Label htmlFor="employee_status">Status Pegawai</Label>
-              <select
-                id="employee_status"
-                value={formData.employee_status}
-                onChange={(e) => setFormData({ ...formData, employee_status: e.target.value })}
-                className="w-full px-3 py-2 border rounded-md"
-                disabled={loading}
+
+            <div className="space-y-2">
+              <Label htmlFor="employment_status">Status Kepegawaian *</Label>
+              <Select
+                value={formData.employment_status || ''}
+                onValueChange={(value) => {
+                  // Clear pns_grade if switching away from PNS
+                  if (value !== 'PNS') {
+                    setFormData(prev => ({ ...prev, employment_status: value as any, pns_grade: null }))
+                  } else {
+                    setFormData(prev => ({ ...prev, employment_status: value as any }))
+                  }
+                }}
               >
-                <option value="ASN">ASN</option>
-                <option value="BLUD">BLUD</option>
-              </select>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PNS">PNS</SelectItem>
+                  <SelectItem value="PPPK">PPPK</SelectItem>
+                  <SelectItem value="BLUD">BLUD</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="tax_status">Status Pajak (PTKP)</Label>
-              <select
-                id="tax_status"
-                value={formData.tax_status}
-                onChange={(e) => setFormData({ ...formData, tax_status: e.target.value })}
-                className="w-full px-3 py-2 border rounded-md"
-                disabled={loading}
+            <div className="space-y-2">
+              <Label htmlFor="tax_status">Status Pajak (PTKP) *</Label>
+              <Select
+                value={formData.tax_status || ''}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, tax_status: value }))}
               >
-                <option value="TK/0">TK/0</option>
-                <option value="TK/1">TK/1</option>
-                <option value="TK/2">TK/2</option>
-                <option value="TK/3">TK/3</option>
-                <option value="K/0">K/0</option>
-                <option value="K/1">K/1</option>
-                <option value="K/2">K/2</option>
-                <option value="K/3">K/3</option>
-              </select>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih Status Pajak" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TK/0">TK/0</SelectItem>
+                  <SelectItem value="TK/1">TK/1</SelectItem>
+                  <SelectItem value="TK/2">TK/2</SelectItem>
+                  <SelectItem value="TK/3">TK/3</SelectItem>
+                  <SelectItem value="K/0">K/0</SelectItem>
+                  <SelectItem value="K/1">K/1</SelectItem>
+                  <SelectItem value="K/2">K/2</SelectItem>
+                  <SelectItem value="K/3">K/3</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            
-            <div>
-              <Label htmlFor="tax_type">Jenis Pajak</Label>
-              <select
-                id="tax_type"
-                value={formData.tax_type}
-                onChange={(e) => setFormData({ ...formData, tax_type: e.target.value })}
-                className="w-full px-3 py-2 border rounded-md"
-                disabled={loading}
-              >
-                <option value="Final">Final</option>
-                <option value="TER">TER</option>
-              </select>
-            </div>
+
+            {formData.employment_status === 'PNS' && (
+              <div className="space-y-2">
+                <Label htmlFor="pns_grade">Golongan PNS</Label>
+                <Select
+                  value={formData.pns_grade || ''}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, pns_grade: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Golongan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="-">-</SelectItem>
+                    <SelectItem value="2">Golongan 2</SelectItem>
+                    <SelectItem value="3">Golongan 3</SelectItem>
+                    <SelectItem value="4">Golongan 4</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="pns_grade">Golongan PNS</Label>
-              <select
-                id="pns_grade"
-                value={formData.pns_grade}
-                onChange={(e) => setFormData({ ...formData, pns_grade: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 border rounded-md"
-                disabled={loading}
-              >
-                <option value="1">Golongan 1</option>
-                <option value="2">Golongan 2</option>
-                <option value="3">Golongan 3</option>
-                <option value="4">Golongan 4</option>
-              </select>
-            </div>
-          </div>
-          
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="position">Jabatan</Label>
@@ -265,7 +269,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
                 disabled={loading}
               />
             </div>
-            
+
             <div>
               <Label htmlFor="nik">NIK</Label>
               <Input
@@ -278,7 +282,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
               />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="phone">Telepon</Label>
@@ -291,7 +295,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
               />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="bank_name">Nama Bank</Label>
@@ -303,7 +307,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
                 disabled={loading}
               />
             </div>
-            
+
             <div>
               <Label htmlFor="bank_account_number">Nomor Rekening</Label>
               <Input
@@ -315,7 +319,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
               />
             </div>
           </div>
-          
+
           <div>
             <Label htmlFor="bank_account_name">Nama Pemegang Rekening</Label>
             <Input
@@ -326,7 +330,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
               disabled={loading}
             />
           </div>
-          
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
               Batal

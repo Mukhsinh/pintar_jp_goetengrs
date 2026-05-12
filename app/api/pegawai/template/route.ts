@@ -11,6 +11,8 @@ export async function GET() {
         'Nama Lengkap': 'John Doe',
         'Kode Unit': 'IT',
         'Jabatan': 'Software Engineer',
+        'Status Pegawai': 'PNS',
+        'Golongan': '3',
         'Email': 'john.doe@example.com',
         'Telepon': '081234567890',
         'Status Pajak': 'TK/0',
@@ -26,6 +28,8 @@ export async function GET() {
         'Nama Lengkap': 'Jane Smith',
         'Kode Unit': 'SALES',
         'Jabatan': 'Sales Manager',
+        'Status Pegawai': 'BLUD',
+        'Golongan': '-',
         'Email': 'jane.smith@example.com',
         'Telepon': '081234567891',
         'Status Pajak': 'K/1',
@@ -48,6 +52,8 @@ export async function GET() {
       { wch: 25 }, // Nama Lengkap
       { wch: 12 }, // Kode Unit
       { wch: 25 }, // Jabatan
+      { wch: 18 }, // Status Pegawai
+      { wch: 10 }, // Golongan
       { wch: 30 }, // Email
       { wch: 15 }, // Telepon
       { wch: 12 }, // Status Pajak
@@ -67,6 +73,8 @@ export async function GET() {
       { 'Kolom': 'Nama Lengkap', 'Keterangan': 'Nama lengkap pegawai (wajib diisi)' },
       { 'Kolom': 'Kode Unit', 'Keterangan': 'Kode unit kerja (wajib diisi, harus sudah ada di master unit)' },
       { 'Kolom': 'Jabatan', 'Keterangan': 'Jabatan pegawai (opsional)' },
+      { 'Kolom': 'Status Pegawai', 'Keterangan': 'PNS, PPPK, atau BLUD (wajib diisi)' },
+      { 'Kolom': 'Golongan', 'Keterangan': 'Pilih 2, 3, atau 4 (hanya untuk status PNS)' },
       { 'Kolom': 'Email', 'Keterangan': 'Email pegawai (wajib diisi, harus unik)' },
       { 'Kolom': 'Telepon', 'Keterangan': 'Nomor telepon (opsional)' },
       { 'Kolom': 'Status Pajak', 'Keterangan': 'TK/0, TK/1, TK/2, TK/3, K/0, K/1, K/2, K/3 (default: TK/0)' },

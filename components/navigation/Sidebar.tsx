@@ -45,6 +45,22 @@ interface MenuItem {
   icon: string
 }
 
+interface SidebarInnerProps {
+  isCollapsed: boolean
+  setIsCollapsed: (c: boolean | ((c: boolean) => boolean)) => void
+  isMobileOpen: boolean
+  setIsMobileOpen: (o: boolean) => void
+  companyInfo: any
+  user: UserProfile | null
+  unitName: string
+  unreadCount: number
+  showLogoutDialog: boolean
+  setShowLogoutDialog: (s: boolean) => void
+  handleLogout: () => Promise<void>
+  isActive: (path: string) => boolean
+  menuItems: MenuItem[]
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const iconMap: Record<string, React.ElementType> = {
@@ -202,20 +218,34 @@ export default function Sidebar() {
 
   // ── Skeleton (shown while loading or not mounted) ──────────────────────────
   const SkeletonContent = () => (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-white border-r border-gray-100">
       <div className="p-5 bg-gradient-to-r from-blue-600 to-blue-700">
         <div className="h-8 bg-blue-500/50 rounded animate-pulse" />
       </div>
-      <div className="p-4 space-y-2">
+      <div className="p-4 space-y-2 flex-1">
         {[...Array(6)].map((_, i) => (
-          <div key={i} className="h-10 bg-gray-100 rounded-xl animate-pulse" />
+          <div key={i} className="h-10 bg-gray-50 rounded-xl animate-pulse" />
         ))}
       </div>
     </div>
   )
 
-  // ── Sidebar inner content ──────────────────────────────────────────────────
-  const SidebarInner = () => (
+  // ── Sidebar Inner Component ───────────────────────────────────────────────
+  const SidebarInner = ({
+    isCollapsed,
+    setIsCollapsed,
+    isMobileOpen,
+    setIsMobileOpen,
+    companyInfo,
+    user,
+    unitName,
+    unreadCount,
+    showLogoutDialog,
+    setShowLogoutDialog,
+    handleLogout,
+    isActive,
+    menuItems
+  }: SidebarInnerProps) => (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="p-5 border-b border-blue-700 bg-gradient-to-r from-blue-600 to-blue-700 flex-shrink-0">
@@ -324,12 +354,18 @@ export default function Sidebar() {
           <div className="p-3 bg-red-50 rounded-xl border border-red-100">
             <p className="text-xs text-gray-700 font-semibold mb-3 text-center">Yakin ingin keluar?</p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="flex-1 h-8 text-xs" onClick={() => setShowLogoutDialog(false)}>
+              <button
+                onClick={() => setShowLogoutDialog(false)}
+                className="flex-1 h-8 text-xs font-semibold rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+              >
                 Batal
-              </Button>
-              <Button size="sm" className="flex-1 h-8 text-xs bg-red-500 hover:bg-red-600 text-white" onClick={handleLogout}>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex-1 h-8 text-xs font-semibold rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
+              >
                 Keluar
-              </Button>
+              </button>
             </div>
           </div>
         ) : (
@@ -375,17 +411,49 @@ export default function Sidebar() {
           isMobileOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        {!mounted || loading ? <SkeletonContent /> : <SidebarInner />}
+        {!mounted || loading ? <SkeletonContent /> : (
+          <SidebarInner
+            isCollapsed={false} // Always expanded on mobile
+            setIsCollapsed={() => { }}
+            isMobileOpen={isMobileOpen}
+            setIsMobileOpen={setIsMobileOpen}
+            companyInfo={companyInfo}
+            user={user}
+            unitName={unitName}
+            unreadCount={unreadCount}
+            showLogoutDialog={showLogoutDialog}
+            setShowLogoutDialog={setShowLogoutDialog}
+            handleLogout={handleLogout}
+            isActive={isActive}
+            menuItems={menuItems}
+          />
+        )}
       </aside>
 
       {/* ── Desktop sidebar (always visible, collapsible) ── */}
       <aside
         className={cn(
           'hidden lg:flex flex-col fixed top-0 left-0 h-screen bg-white border-r border-gray-200 shadow-sm z-[50] transition-all duration-300',
-          isCollapsed ? 'w-20' : 'w-72'
+          mounted && isCollapsed ? 'w-20' : 'w-72'
         )}
       >
-        {!mounted || loading ? <SkeletonContent /> : <SidebarInner />}
+        {!mounted || loading ? <SkeletonContent /> : (
+          <SidebarInner
+            isCollapsed={isCollapsed}
+            setIsCollapsed={setIsCollapsed}
+            isMobileOpen={false}
+            setIsMobileOpen={() => { }}
+            companyInfo={companyInfo}
+            user={user}
+            unitName={unitName}
+            unreadCount={unreadCount}
+            showLogoutDialog={showLogoutDialog}
+            setShowLogoutDialog={setShowLogoutDialog}
+            handleLogout={handleLogout}
+            isActive={isActive}
+            menuItems={menuItems}
+          />
+        )}
       </aside>
     </>
   )

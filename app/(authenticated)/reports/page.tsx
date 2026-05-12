@@ -137,8 +137,17 @@ function IncentiveTable({ data }: { data: any[] }) {
               <div className="text-[10px] text-gray-400 font-normal">(Skor×PIR) + Kuantitatif</div>
               {formatCurrency(parseFloat(row.gross_incentive) || 0)}
             </td>
-            <td className="border p-2 text-right text-red-600">{formatCurrency(parseFloat(row.tax_amount) || 0)}</td>
-            <td className="border p-2 text-right font-bold text-green-700">{formatCurrency(parseFloat(row.net_incentive) || 0)}</td>
+            <td className="border p-2 text-right text-red-600">
+              {formatCurrency(parseFloat(row.tax_amount) || 0)}
+              {row.tax_detail && <div className="text-[10px] text-gray-500 italic">({row.tax_detail})</div>}
+              {row.tax_mechanism_used === 'none' && !row.tax_detail && <div className="text-[10px] text-gray-400 italic">(N/A)</div>}
+            </td>
+            <td className="border p-2 text-right font-bold text-green-700">
+              <div className="text-[10px] text-gray-400 font-normal">
+                {row.tax_mechanism_used === 'none' ? 'Incentive (Sebelum Pajak)' : 'Take Home Pay'}
+              </div>
+              {formatCurrency(parseFloat(row.net_incentive) || 0)}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -172,27 +181,61 @@ function UnitComparisonTable({ data }: { data: any[] }) {
 }
 
 function KPIAchievementTable({ data }: { data: any[] }) {
+  const indexData = data.filter(d => !d.is_activity)
+  const activityData = data.filter(d => d.is_activity)
+
   return (
-    <table className="w-full border-collapse text-sm">
-      <thead>
-        <tr className="bg-gray-100">
-          <th className="border p-2 text-left font-semibold">NAMA</th>
-          <th className="border p-2 text-left font-semibold">INDIKATOR</th>
-          <th className="border p-2 text-right font-semibold">BOBOT</th>
-          <th className="border p-2 text-right font-semibold">PENCAPAIAN</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((row: any, idx: number) => (
-          <tr key={idx} className="hover:bg-gray-50">
-            <td className="border p-2 font-medium">{safeRender(row.employee_name || row.unit_name)}</td>
-            <td className="border p-2">{safeRender(row.indicator || row.indicator_name)}</td>
-            <td className="border p-2 text-right">{safeRender(row.weight)}</td>
-            <td className="border p-2 text-right font-bold text-blue-700">{safeRender(row.achievement_percentage)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="space-y-6">
+      {indexData.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-lg font-semibold text-blue-700">KATEGORI BERBASIS INDEKS</h3>
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border p-2 text-left font-semibold">NAMA</th>
+                <th className="border p-2 text-left font-semibold">INDIKATOR</th>
+                <th className="border p-2 text-right font-semibold">BOBOT</th>
+                <th className="border p-2 text-right font-semibold">PENCAPAIAN</th>
+              </tr>
+            </thead>
+            <tbody>
+              {indexData.map((row: any, idx: number) => (
+                <tr key={idx} className="hover:bg-gray-50">
+                  <td className="border p-2 font-medium">{safeRender(row.employee_name || row.unit_name)}</td>
+                  <td className="border p-2">{safeRender(row.indicator || row.indicator_name)}</td>
+                  <td className="border p-2 text-right">{safeRender(row.weight)}%</td>
+                  <td className="border p-2 text-right font-bold text-blue-700">{safeRender(row.achievement_percentage)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {activityData.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-lg font-semibold text-orange-700">KATEGORI BERBASIS AKTIVITAS</h3>
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border p-2 text-left font-semibold">NAMA</th>
+                <th className="border p-2 text-left font-semibold">INDIKATOR</th>
+                <th className="border p-2 text-right font-semibold">VOLUME / REALISASI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activityData.map((row: any, idx: number) => (
+                <tr key={idx} className="hover:bg-gray-50">
+                  <td className="border p-2 font-medium">{safeRender(row.employee_name || row.unit_name)}</td>
+                  <td className="border p-2">{safeRender(row.indicator || row.indicator_name)}</td>
+                  <td className="border p-2 text-right font-bold text-orange-700">{safeRender(row.realization_value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   )
 }
 

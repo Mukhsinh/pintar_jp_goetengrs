@@ -63,6 +63,20 @@ export async function POST(request: NextRequest) {
         const bankAccountName = row['Nama Pemilik Rekening']?.toString()
         const roleStr = row['Role']?.toString().toLowerCase()
         const status = row['Status']?.toString().toLowerCase()
+        const rawStatus = String(row['Status Pegawai'] || row['status_pegawai'] || row['Employment Status'] || '').toUpperCase()
+        let employmentStatus: 'PNS' | 'PPPK' | 'BLUD' = 'BLUD'
+
+        if (rawStatus.includes('PNS') || rawStatus.includes('ASN')) {
+          employmentStatus = 'PNS'
+        } else if (rawStatus.includes('PPPK')) {
+          employmentStatus = 'PPPK'
+        } else if (rawStatus.includes('BLUD')) {
+          employmentStatus = 'BLUD'
+        }
+
+        const rawGrade = String(row['Golongan'] || row['golongan'] || row['PNS Grade'] || '').trim().replace(/[^0-9]/g, '')
+        const pnsGrade = employmentStatus === 'PNS' ? (rawGrade || null) : null
+        const taxTypeReq = row['Jenis Pajak']?.toString()
 
         if (!employeeCode || !fullName || !unitCode || !email || !roleStr) {
           throw new Error('Data wajib tidak lengkap (Kode Pegawai, Nama, Kode Unit, Email, Role)')
@@ -150,6 +164,10 @@ export async function POST(request: NextRequest) {
           bank_account_number: bankAccountNumber || null,
           bank_account_name: bankAccountName || null,
           role: normalizedRole,
+          employment_status: employmentStatus,
+          employee_status: employmentStatus, // Keep for legacy compatibility
+          tax_type: taxTypeReq || 'Final',
+          pns_grade: pnsGrade,
           is_active: status ? status === 'aktif' : true,
           updated_at: new Date().toISOString()
         }

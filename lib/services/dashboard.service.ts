@@ -585,83 +585,109 @@ export class DashboardService {
   static async getPerformanceTrend(months: number = 6, unitId?: string, period?: string, year?: string): Promise<PerformanceData[]> {
     const supabase = await createClient()
 
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+    const data: PerformanceData[] = []
+
+    const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
+    const lastPeriod = resolvedPeriods[resolvedPeriods.length - 1]
+    const currentYear = parseInt(lastPeriod.slice(0, 4))
+    const currentMonth = parseInt(lastPeriod.slice(5, 7)) - 1
+    const endDate = new Date(currentYear, currentMonth, 1)
+
+    // Fetch all assessments for the last 6 months in one query to optimize
+    const periods: string[] = []
+    for (let i = months - 1; i >= 0; i--) {
+      const date = new Date(endDate.getFullYear(), endDate.getMonth() - i, 1)
+      periods.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`)
+    }
+
     try {
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
-      const data: PerformanceData[] = []
-
-      // If a specific month period is selected (M-XX), use that as the end date
-      // Otherwise use the latest period in resolvedPeriods
-      const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
-      const lastPeriod = resolvedPeriods[resolvedPeriods.length - 1]
-
-      const currentYear = parseInt(lastPeriod.slice(0, 4))
-      const currentMonth = parseInt(lastPeriod.slice(5, 7)) - 1 // 0-based
-
-      const endDate = new Date(currentYear, currentMonth, 1)
-
-      for (let i = months - 1; i >= 0; i--) {
-        const date = new Date(endDate.getFullYear(), endDate.getMonth() - i, 1)
-        const periodStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-        const monthName = monthNames[date.getMonth()]
-
-        let q = supabase
-          .from('t_kpi_assessments')
-          .select(`
-            score,
-            m_kpi_indicators!t_kpi_assessments_indicator_id_fkey (
-              m_kpi_categories!m_kpi_indicators_category_id_fkey (category)
+      let q = supabase
+        .from('t_kpi_assessments')
+        .select(`
+          period,
+          employee_id,
+          realization_value,
+          target_value,
+          weight_percentage,
+          m_kpi_indicators (
+            m_kpi_categories (
+              category,
+              weight_percentage
             )
-          `)
-          .eq('period', periodStr)
+          )
+        `)
+        .in('period', periods)
 
-        if (unitId) {
-          const { data: emps } = await supabase.from('m_employees').select('id').eq('unit_id', unitId)
-          const empIds = emps?.map((e: any) => e.id) || []
-          q = q.in('employee_id', empIds)
-        }
+      if (unitId) {
+        const { data: emps } = await supabase.from('m_employees').select('id').eq('unit_id', unitId)
+        const empIds = emps?.map((e: any) => e.id) || []
+        q = q.in('employee_id', empIds)
+      }
 
-        const { data: assessments, error } = await q
+      const { data: assessments, error } = await q
+      if (error) throw error
 
-        let p1 = 0, p2 = 0, p3 = 0, total = 0
-        let p1Count = 0, p2Count = 0, p3Count = 0
+      // Process month-by-month
+      for (const periodStr of periods) {
+        const monthIndex = parseInt(periodStr.slice(5, 7)) - 1
+        const monthName = monthNames[monthIndex]
 
-        if (!error && assessments && assessments.length > 0) {
-          assessments.forEach(a => {
-            const indicator = (Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators) as any
+        const monthAss = (assessments || []).filter(a => a.period === periodStr)
+        const empIds = Array.from(new Set(monthAss.map(a => a.employee_id)))
+
+        let p1Sum = 0, p2Sum = 0, p3Sum = 0, totalSum = 0
+        let empWithScoreCount = 0
+
+        for (const empId of empIds) {
+          const empAss = monthAss.filter(a => a.employee_id === empId)
+
+          const calcCatContribution = (catName: string) => {
+            const catAss = empAss.filter((a: any) => {
+              const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
+              const categoryObj = indicator?.m_kpi_categories
+              const cat = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
+              return cat === catName
+            })
+
+            if (catAss.length === 0) return 0
+
+            const first: any = catAss[0]
+            const indicator: any = Array.isArray(first.m_kpi_indicators) ? first.m_kpi_indicators[0] : first.m_kpi_indicators
             const categoryObj = indicator?.m_kpi_categories
-            const category = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
-            const score = a.score || 0
+            const catWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
 
-            if (category === 'P1') {
-              p1 += score
-              p1Count++
-            } else if (category === 'P2') {
-              p2 += score
-              p2Count++
-            } else if (category === 'P3') {
-              p3 += score
-              p3Count++
+            let totalR = 0, totalT = 0
+            for (const a of catAss) {
+              const w = parseFloat((a as any).weight_percentage) || 0
+              totalR += (parseFloat((a as any).realization_value) || 0) * (w / 100)
+              totalT += (parseFloat((a as any).target_value) || 100) * (w / 100)
             }
-            total += score
-          })
 
-          p1 = p1Count > 0 ? p1 / p1Count : 0
-          p2 = p2Count > 0 ? p2 / p2Count : 0
-          p3 = p3Count > 0 ? p3 / p3Count : 0
-          total = assessments.length > 0 ? total / assessments.length : 0
+            return totalT > 0 ? (totalR / totalT) * catWeight : 0
+          }
+
+          const empP1 = calcCatContribution('P1')
+          const empP2 = calcCatContribution('P2')
+          const empP3 = calcCatContribution('P3')
+
+          p1Sum += empP1
+          p2Sum += empP2
+          p3Sum += empP3
+          totalSum += (empP1 + empP2 + empP3)
+          empWithScoreCount++
         }
 
         data.push({
           month: monthName,
-          p1: Math.round(p1 * 10) / 10,
-          p2: Math.round(p2 * 10) / 10,
-          p3: Math.round(p3 * 10) / 10,
-          total: Math.round(total * 10) / 10
+          p1: empWithScoreCount > 0 ? Math.round((p1Sum / empWithScoreCount) * 10) / 10 : 0,
+          p2: empWithScoreCount > 0 ? Math.round((p2Sum / empWithScoreCount) * 10) / 10 : 0,
+          p3: empWithScoreCount > 0 ? Math.round((p3Sum / empWithScoreCount) * 10) / 10 : 0,
+          total: empWithScoreCount > 0 ? Math.round((totalSum / empWithScoreCount) * 10) / 10 : 0
         })
       }
-
       return data
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error in getPerformanceTrend:', error)
       return []
     }
@@ -724,9 +750,15 @@ export class DashboardService {
       let query = supabase
         .from('t_kpi_assessments')
         .select(`
-          score,
-          m_kpi_indicators!t_kpi_assessments_indicator_id_fkey (
-            m_kpi_categories!m_kpi_indicators_category_id_fkey (category)
+          employee_id,
+          realization_value,
+          target_value,
+          weight_percentage,
+          m_kpi_indicators (
+            m_kpi_categories (
+              category,
+              weight_percentage
+            )
           )
         `)
         .in('period', resolvedPeriods)
@@ -738,26 +770,50 @@ export class DashboardService {
       }
 
       const { data: assessments, error } = await query
+      if (error) throw error
 
-      let p1Total = 0, p2Total = 0, p3Total = 0
+      const empIds = Array.from(new Set((assessments || []).map(a => a.employee_id)))
+      let p1Sum = 0, p2Sum = 0, p3Sum = 0
+      let empCount = 0
 
-      if (!error && assessments && assessments.length > 0) {
-        assessments.forEach(a => {
-          const indicator = (Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators) as any
+      for (const empId of empIds) {
+        const empAss = (assessments || []).filter(a => a.employee_id === empId)
+
+        const calcCatContrib = (catName: string) => {
+          const catAss = empAss.filter(a => {
+            const indicator = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
+            const categoryObj = indicator?.m_kpi_categories
+            const cat = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
+            return cat === catName
+          })
+
+          if (catAss.length === 0) return 0
+
+          const first = catAss[0]
+          const indicator = Array.isArray(first.m_kpi_indicators) ? first.m_kpi_indicators[0] : first.m_kpi_indicators
           const categoryObj = indicator?.m_kpi_categories
-          const category = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
-          const score = a.score || 0
+          const catWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
 
-          if (category === 'P1') p1Total += score
-          else if (category === 'P2') p2Total += score
-          else if (category === 'P3') p3Total += score
-        })
+          let totalR = 0, totalT = 0
+          for (const a of catAss) {
+            const w = parseFloat(a.weight_percentage) || 0
+            totalR += (parseFloat(a.realization_value) || 0) * (w / 100)
+            totalT += (parseFloat(a.target_value) || 100) * (w / 100)
+          }
+
+          return totalT > 0 ? (totalR / totalT) * catWeight : 0
+        }
+
+        p1Sum += calcCatContrib('P1')
+        p2Sum += calcCatContrib('P2')
+        p3Sum += calcCatContrib('P3')
+        empCount++
       }
 
       return [
-        { name: 'P1 (Posisi)', value: Math.round(p1Total), color: '#3b82f6' },
-        { name: 'P2 (Kinerja)', value: Math.round(p2Total), color: '#10b981' },
-        { name: 'P3 (Potensi)', value: Math.round(p3Total), color: '#f59e0b' }
+        { name: 'P1 (Posisi)', value: empCount > 0 ? Math.round(p1Sum / empCount) : 0, color: '#3b82f6' },
+        { name: 'P2 (Kinerja)', value: empCount > 0 ? Math.round(p2Sum / empCount) : 0, color: '#10b981' },
+        { name: 'P3 (Potensi)', value: empCount > 0 ? Math.round(p3Sum / empCount) : 0, color: '#f59e0b' }
       ]
     } catch (error) {
       console.error('Error in getKPIDistribution:', error)

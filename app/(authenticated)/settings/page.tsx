@@ -42,6 +42,9 @@ interface Settings {
   session_timeout: {
     hours: number
   }
+  tax_config: {
+    mechanism: 'none' | 'ter' | 'final_pp80'
+  }
 }
 
 export default function SettingsPage() {
@@ -75,6 +78,9 @@ export default function SettingsPage() {
     },
     session_timeout: {
       hours: 8
+    },
+    tax_config: {
+      mechanism: 'ter'
     }
   })
   const [isLoading, setIsLoading] = useState(true)
@@ -111,6 +117,7 @@ export default function SettingsPage() {
       const terRates = settingsMap.ter_rates || {}
       const calcParams = settingsMap.calculation_params || {}
       const sessionTimeout = settingsMap.session_timeout || {}
+      const taxConfig = settingsMap.tax_config || { mechanism: 'ter' }
 
       setSettings({
         app_name: orgSettings.appName || 'JASPEL',
@@ -142,6 +149,9 @@ export default function SettingsPage() {
         },
         session_timeout: {
           hours: sessionTimeout.hours ?? 8
+        },
+        tax_config: {
+          mechanism: taxConfig.mechanism || 'ter'
         }
       })
 
@@ -346,6 +356,21 @@ export default function SettingsPage() {
         throw sessionError
       }
 
+      // Upsert tax config (Global Mechanism)
+      const { error: taxConfigError } = await supabase
+        .from('t_settings')
+        .upsert({
+          key: 'tax_config',
+          value: settings.tax_config,
+          updated_by: user?.id,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' })
+
+      if (taxConfigError) {
+        console.error('Tax config error:', taxConfigError)
+        throw taxConfigError
+      }
+
       toast.success('Pengaturan berhasil disimpan')
       setLogoFile(null)
       await loadSettings()
@@ -516,12 +541,33 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Konfigurasi Pajak PPh 21 (PP 58/2023)</CardTitle>
           <CardDescription>
-            Perhitungan PPh 21 menggunakan metode Tarif Efektif Rata-rata (TER) secara otomatis
+            Pilih pola perhitungan pajak yang akan digunakan pada periode laporan berjalan
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          <div className="space-y-2 mb-6">
+            <Label htmlFor="tax_mechanism" className="text-base font-bold text-blue-800">Mekanisme Pajak Global</Label>
+            <select
+              id="tax_mechanism"
+              value={settings.tax_config.mechanism}
+              onChange={(e) => setSettings({
+                ...settings,
+                tax_config: { mechanism: e.target.value as any }
+              })}
+              className="w-full px-3 py-2 border-2 border-blue-200 rounded-md bg-blue-50 focus:ring-2 focus:ring-blue-500 font-medium"
+            >
+              <option value="none">1. Tanpa Potongan Pajak (Bruto Only)</option>
+              <option value="ter">2. Mekanisme TER (PP 58/2023)</option>
+              <option value="final_pp80">3. Mekanisme Final (PP 80/2010)</option>
+            </select>
+            <p className="text-sm text-blue-600 italic">
+              {settings.tax_config.mechanism === 'none' && "* Laporan hanya menampilkan nilai Bruto. Keterangan 'Sebelum Pajak' akan ditambahkan."}
+              {settings.tax_config.mechanism === 'ter' && "* Menggunakan tabel TER Januari-November dan Pasal 17 pada bulan Desember."}
+              {settings.tax_config.mechanism === 'final_pp80' && "* Final PNS: Gol IV (15%), Gol III (5%), Gol II/Bawah & Non-PNS (0%)."}
+            </p>
+          </div>
+
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Perhitungan Otomatis</AlertTitle>

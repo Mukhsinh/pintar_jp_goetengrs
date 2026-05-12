@@ -33,12 +33,14 @@ export async function exportToExcel(options: ReportExportOptions): Promise<Buffe
     case 'employee-slip':
       sheetName = reportType === 'incentive' ? 'Incentive Report' : 'Employee Slip'
       wsData = [
-        ['NIP/NIK', 'NIK', 'Nama Pegawai', 'Unit', 'Nama Bank', 'No. Rekening', 'Nama Pemilik Rek', 'Status Pajak', 'P1 Score', 'P2 Score', 'P3 Score', 'Total Skor', 'Insentif Bruto', 'Pajak', 'Insentif Netto'],
+        ['NIP/NIK', 'NIK', 'Nama Pegawai', 'Unit', 'Status Pegawai', 'Golongan', 'Nama Bank', 'No. Rekening', 'Nama Pemilik Rek', 'Status Pajak', 'P1 Score', 'P2 Score', 'P3 Score', 'Total Skor', 'Insentif Bruto', 'Pajak', 'Keterangan Pajak', 'Insentif Netto'],
         ...data.map((row: any) => [
           row.employee_code || '-',
           row.nik || '-',
           row.employee_name,
           row.unit || '-',
+          row.employee_status || '-',
+          row.pns_grade || '-',
           row.bank_name || '-',
           row.bank_account_number || '-',
           row.bank_account_holder || row.employee_name || '-',
@@ -49,16 +51,21 @@ export async function exportToExcel(options: ReportExportOptions): Promise<Buffe
           row.total_score,
           row.gross_incentive,
           row.tax_amount,
+          row.tax_detail || '-',
           row.net_incentive,
         ]),
       ]
       break
 
-    case 'kpi-achievement':
+    case 'kpi-achievement': {
       sheetName = 'KPI Achievement'
+      const indexData = data.filter((d: any) => !d.is_activity)
+      const activityData = data.filter((d: any) => d.is_activity)
+
       wsData = [
+        ['--- KATEGORI BERBASIS INDEKS ---'],
         ['Nama Pegawai / Unit', 'Kategori', 'Indikator', 'Target', 'Realisasi', 'Capaian (%)', 'Nilai', 'Selisih (Gap)'],
-        ...data.map((row: any) => [
+        ...indexData.map((row: any) => [
           row.employee_name || row.unit_name || '-',
           row.category,
           row.indicator_name,
@@ -68,8 +75,18 @@ export async function exportToExcel(options: ReportExportOptions): Promise<Buffe
           row.score,
           row.gap
         ]),
+        [],
+        ['--- KATEGORI BERBASIS AKTIVITAS ---'],
+        ['Nama Pegawai / Unit', 'Kategori', 'Indikator', 'Volume / Realisasi'],
+        ...activityData.map((row: any) => [
+          row.employee_name || row.unit_name || '-',
+          row.category,
+          row.indicator_name,
+          row.realization_value
+        ]),
       ]
       break
+    }
 
     case 'unit-comparison':
       sheetName = 'Unit Comparison'
@@ -113,16 +130,30 @@ export async function exportToExcel(options: ReportExportOptions): Promise<Buffe
   // Create worksheet
   const ws = XLSX.utils.aoa_to_sheet(wsData)
 
-  // Apply formatting: Bold headers
-  // Headers are now shifted down by kopSurat.length rows
-  const headerRowIdx = kopSurat.length
+  // Apply formatting: format any cell where the value is 'Nama Pegawai/Unit' or similar, and that entire row
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
-  for (let col = range.s.c; col <= range.e.c; col++) {
-    const cellAddress = XLSX.utils.encode_cell({ r: headerRowIdx, c: col })
-    if (!ws[cellAddress]) continue
-    ws[cellAddress].s = {
-      font: { bold: true, color: { rgb: "FFFFFF" } },
-      fill: { fgColor: { rgb: '2563EB' } }, // Professional Blue
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const firstCellAddress = XLSX.utils.encode_cell({ r, c: 0 })
+    const cellValue = ws[firstCellAddress]?.v
+
+    // Header Style
+    if (cellValue === 'Nama Pegawai / Unit' || cellValue === 'NIP/NIK' || cellValue === 'Unit Name') {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cellAddr = XLSX.utils.encode_cell({ r, c })
+        if (ws[cellAddr]) {
+          ws[cellAddr].s = {
+            font: { bold: true, color: { rgb: "FFFFFF" } },
+            fill: { fgColor: { rgb: '2563EB' } }, // Professional Blue
+          }
+        }
+      }
+    }
+
+    // Sub-title Style
+    if (cellValue === '--- KATEGORI BERBASIS INDEKS ---' || cellValue === '--- KATEGORI BERBASIS AKTIVITAS ---') {
+      ws[firstCellAddress].s = {
+        font: { bold: true, color: { rgb: "2563EB" } },
+      }
     }
   }
 

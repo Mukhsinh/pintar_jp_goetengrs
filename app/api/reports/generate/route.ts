@@ -1,22 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { isMedicalUnit } from '@/lib/utils/medical-unit'
-import ExcelJS from 'exceljs'
 import * as fs from 'fs'
 
 const OMIT_KEYS = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
 import { getTERCategory, getTERRate } from '@/lib/formulas/ter-lookup'
 
-/**
- * PPh 21 Tax Calculator (TER - PP 58/2023)
- * Calculates monthly tax based on TER categories and gross income.
- * ASN with Final tax type: 0% (exempt)
- */
-function calculatePPh21(monthlyGross: number, employeeStatus?: string, taxType?: string, taxStatus: string = 'TK/0'): number {
-  // ASN with Final tax → exempt
-  if (employeeStatus === 'ASN' && taxType === 'Final') return 0
-  if (monthlyGross <= 0) return 0
+function calculatePPh21(
+  monthlyGross: number,
+  employeeStatus?: string,
+  taxType?: string,
+  taxStatus: string = 'TK/0',
+  pnsGrade?: string | number,
+  mechanism: 'none' | 'ter' | 'final_pp80' = 'ter'
+): { amount: number, text: string } {
+  if (monthlyGross <= 0) return { amount: 0, text: 'Rp 0' }
+
+  // 1. Tanpa Potongan Pajak
+  if (mechanism === 'none') return { amount: 0, text: 'Tanpa Potongan (0%)' }
+
+  // 2. Mekanisme Final (PP 80/2010)
+  if (mechanism === 'final_pp80') {
+    // Only applies to ASN (PNS) or if a grade is explicitly provided
+    // status can be in employeeStatus (legacy) or potentially passed via employmentStatus
+    const stat = (employeeStatus || '').toUpperCase()
+    const gradeStr = String(pnsGrade || '').trim().toUpperCase()
+    const hasGrade = gradeStr !== '' && gradeStr !== '-' && gradeStr !== 'NULL'
+
+    // PPPK and BLUD are treated as Grade II or below (0% tax under PP 80/2010)
+    if (stat === 'PPPK' || stat === 'BLUD') {
+      return { amount: 0, text: `${stat} (Bukan PNS/ASN - 0%)` }
+    }
+
+    // Robust check: If status is 'ASN'/'PNS' OR it's 'ACTIVE' with a valid grade, treat as PNS
+    if (stat !== 'ASN' && stat !== 'PNS' && stat !== 'ACTIVE' && stat !== 'PNS' && !hasGrade) {
+      return { amount: 0, text: 'Bukan PNS/ASN (0%)' }
+    }
+
+    if (gradeStr.startsWith('IV') || gradeStr.startsWith('4')) {
+      return { amount: Math.round(monthlyGross * 0.15), text: `15% x Bruto (PNS Golongan IV)` }
+    }
+    if (gradeStr.startsWith('III') || gradeStr.startsWith('3')) {
+      return { amount: Math.round(monthlyGross * 0.05), text: `5% x Bruto (PNS Golongan III)` }
+    }
+
+    // Fallback detection if status is ASN/PNS but grade is undefined/null
+    if (stat === 'ASN' || stat === 'PNS' || stat === 'ACTIVE') {
+      return { amount: Math.round(monthlyGross * 0.05), text: `5% x Bruto (PNS - Gradeless fallback)` }
+    }
+
+    return { amount: 0, text: `Golongan II Kebawah / Lainnya (0%)` }
+  }
+
+  // 3. Mekanisme TER (PP 58/2023) - Default
+  // Ensure that if 'ter' is globally chosen, it calculates TER for everyone based on PTKP
+  // We do NOT exempt ASN Final here because setting ter globally overrides legacy Final tax rules.
 
   // Get TER Category based on PTKP status
   const category = getTERCategory(taxStatus)
@@ -27,7 +66,7 @@ function calculatePPh21(monthlyGross: number, employeeStatus?: string, taxType?:
   // Calculate Tax
   const taxAmount = (monthlyGross * ratePercentage) / 100
 
-  return Math.round(taxAmount)
+  return { amount: Math.round(taxAmount), text: `${ratePercentage}% x Bruto (TER Kategori ${category})` }
 }
 
 /**
@@ -145,6 +184,15 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
   if (!poolData) {
     throw new Error(`Data pool tidak ditemukan untuk periode ${period}. Silakan buat data pool terlebih dahulu di menu Pengaturan Pool.`);
   }
+
+  // 1.5 Get Global Tax Mechanism
+  const { data: taxSetting } = await supabase
+    .from('t_settings')
+    .select('value')
+    .eq('key', 'tax_config')
+    .maybeSingle()
+
+  const taxMechanism = (taxSetting?.value as any)?.mechanism || 'ter'
 
   const netPool = Number(poolData.net_pool || 0);
 
@@ -382,8 +430,10 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
     const isMedical = isMedicalUnit(uId, unitName)
 
     // Formula: (Total Skor x PIR) + Total Activity Rupiah
-    let grossIncentive = (totalScore * pir) + totalActivityRupiah
+    const indexIncentive = totalScore * pir
+    let grossIncentive = indexIncentive + totalActivityRupiah
 
+    let guaranteeFee = 0
     if (isMedical) {
       // For doctors, also add Guarantee Fee
       const { data: doctorMaster } = await supabase
@@ -393,15 +443,22 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
         .eq('periode_id', period)
         .maybeSingle()
 
-      const guaranteeFee = Number(doctorMaster?.pagu_guarantee_fee || 0)
+      guaranteeFee = Number(doctorMaster?.pagu_guarantee_fee || 0)
       grossIncentive += guaranteeFee
     }
 
     // PPh 21
-    const taxAmount = calculatePPh21(grossIncentive, emp.employee_status, emp.tax_type, emp.tax_status)
+    const taxCheck = calculatePPh21(
+      grossIncentive,
+      emp.employment_status || emp.employee_status,
+      emp.tax_type,
+      emp.tax_status,
+      emp.pns_grade,
+      taxMechanism as any
+    )
 
     // Insentif Netto = Bruto - Pajak
-    const netIncentive = grossIncentive - taxAmount
+    const netIncentive = grossIncentive - taxCheck.amount
 
     const mappedNik = emp.nik || emp.NIK || '-'
     const mappedBankName = emp.bank_name || emp.BANK_NAME || emp.nama_bank || '-'
@@ -425,9 +482,11 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
       bank_name: mappedBankName,
       bank_account_number: mappedBankAccount,
       bank_account_holder: mappedBankHolder,
-      tax_status: emp.tax_status || 'Non-PKP',
-      employee_status: emp.employee_status || '-',
-      tax_type: emp.tax_type || '-',
+      tax_status: emp.tax_status || 'TK/0',
+      employee_status: emp.employment_status || ((emp.employee_status === 'active' || emp.employee_status === 'ASN') ? 'ASN' : (emp.employee_status || 'BLUD')),
+      tax_type: (emp.tax_type === 'gross' || emp.tax_type === 'Final') ? 'Final' : (emp.tax_type || 'TER'),
+      pns_grade: (emp.pns_grade && emp.pns_grade !== 'null') ? emp.pns_grade : '-',
+      tax_mechanism_used: taxMechanism,
       p1_score: p1,
       p2_score: p2,
       p3_score: p3,
@@ -438,12 +497,15 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
       pir_value: pir,
       total_activity: totalActivityRupiah,
       total_activity_rupiah: totalActivityRupiah,
+      index_incentive: indexIncentive,
+      guarantee_fee: guaranteeFee,
       total_skor_unit: totalSkorUnit,
       unit_proportion: unitProp,
       unit_allocation: uId ? (netPool * (unitProp / 100)) : 0,
       unit_total_activity: uId ? (unitTotalActivityMap.get(uId) || 0) : 0,
       gross_incentive: grossIncentive,
-      tax_amount: taxAmount,
+      tax_amount: taxCheck.amount,
+      tax_detail: taxCheck.text,
       net_incentive: netIncentive,
       assessment_details: assessmentDetails,
     })
@@ -478,8 +540,10 @@ async function generateKPIAchievementReport(supabase: any, period: string, unitI
         name,
         target_value,
         weight_percentage,
+        basic_index_value,
         m_kpi_categories (
-          category
+          category,
+          configuration_style
         )
       )
     `)
@@ -525,6 +589,10 @@ async function generateKPIAchievementReport(supabase: any, period: string, unitI
     const unitData = Array.isArray(empRecord?.m_units) ? empRecord?.m_units[0] : empRecord?.m_units
     const unitName = unitData?.name || '-'
 
+    const basicVal = parseFloat(row.m_kpi_indicators.basic_index_value) || 0
+    const catStyle = row.m_kpi_indicators.m_kpi_categories?.configuration_style
+    const isActivity = catStyle === 'activity' || basicVal > 0
+
     if (existing) {
       existing.count++
       existing.sum_realization += Number(row.realization_value || 0)
@@ -536,6 +604,7 @@ async function generateKPIAchievementReport(supabase: any, period: string, unitI
         weight: row.m_kpi_indicators.weight_percentage,
         employee_name: empName,
         unit_name: unitName,
+        is_activity: isActivity,
         count: 1,
         sum_realization: Number(row.realization_value || 0),
         sum_target_value: Number(row.target_value || row.m_kpi_indicators.target_value || 0),
@@ -563,7 +632,8 @@ async function generateKPIAchievementReport(supabase: any, period: string, unitI
       realization_value: realization.toFixed(2),
       gap: gap.toFixed(2),
       achievement_percentage: achievement_percentage.toFixed(2),
-      score: score.toFixed(2)
+      score: score.toFixed(2),
+      is_activity: item.is_activity
     };
   })
 
@@ -671,6 +741,7 @@ async function generateEmployeeSlipReport(supabase: any, period: string, unitId?
       bank_account_holder: row.bank_account_holder,
       tax_status: row.tax_status || 'Non-PKP',
       employee_status: row.employee_status || '-',
+      pns_grade: (row.pns_grade && row.pns_grade !== '-' && row.pns_grade !== 'null') ? row.pns_grade : '-',
       tax_type: row.tax_type || '-',
       p1_score: row.p1_score,
       p1_weighted: row.p1_score,
@@ -688,13 +759,17 @@ async function generateEmployeeSlipReport(supabase: any, period: string, unitId?
       pir_value: row.pir_value,
       total_activity: row.total_activity,
       total_activity_rupiah: row.total_activity_rupiah,
+      index_incentive: row.index_incentive,
+      guarantee_fee: row.guarantee_fee,
       total_skor_unit: row.total_skor_unit,
       unit_proportion: row.unit_proportion,
       unit_allocation: row.unit_allocation,
       unit_total_activity: row.unit_total_activity,
       gross_incentive: row.gross_incentive,
       tax_amount: row.tax_amount,
+      tax_detail: row.tax_detail || '-',
       net_incentive: row.net_incentive,
+      tax_mechanism_used: row.tax_mechanism_used,
     })
   }
 

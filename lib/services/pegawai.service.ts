@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client'
 import type { Pegawai, CreatePegawaiData, UpdatePegawaiData } from '@/lib/types/database.types'
+import { createPegawai as createPegawaiAction, updatePegawai as updatePegawaiAction } from '@/app/(authenticated)/pegawai/actions'
 
 /**
  * Get all pegawai with pagination and search
@@ -99,115 +100,25 @@ export async function createPegawai(
   input: CreatePegawaiData
 ): Promise<{ success: boolean; pegawai?: Pegawai; error?: string }> {
   try {
-    const supabase = createClient()
-
-    // Check if employee code already exists
-    const { data: existingCode } = await supabase
-      .from('m_employees')
-      .select('id')
-      .eq('employee_code', input.employee_code)
-      .single()
-
-    if (existingCode) {
-      return { success: false, error: 'Kode pegawai sudah digunakan' }
+    const result = await createPegawaiAction(input)
+    if (!result.success) {
+      return { success: false, error: result.error }
     }
-
-    // Check if NIK already exists (if provided)
-    if (input.nik) {
-      const { data: existingNik } = await supabase
-        .from('m_employees')
-        .select('id')
-        .eq('nik', input.nik)
-        .single()
-
-      if (existingNik) {
-        return { success: false, error: 'NIK sudah terdaftar' }
-      }
-    }
-
-    // Create pegawai record
-    const { data, error } = await supabase
-      .from('m_employees')
-      .insert({
-        employee_code: input.employee_code,
-        full_name: input.full_name,
-        unit_id: input.unit_id,
-        position: input.position || null,
-        phone: input.phone || null,
-        nik: input.nik || null,
-        bank_name: input.bank_name || null,
-        bank_account_number: input.bank_account_number || null,
-        bank_account_name: input.bank_account_name || null,
-        tax_status: input.tax_status || 'TK/0',
-        employee_status: (input as any).employee_status || 'ASN',
-        tax_type: (input as any).tax_type || 'TER',
-        pns_grade: (input as any).pns_grade || 3,
-        is_active: true,
-      })
-      .select()
-      .single()
-
-    if (error) {
-      return { success: false, error: error.message }
-    }
-
-    return { success: true, pegawai: data as Pegawai }
+    return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }
   }
 }
 
-/**
- * Update pegawai data
- */
 export async function updatePegawai(
   id: string,
   updates: UpdatePegawaiData
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const supabase = createClient()
-
-    // Check if employee code already exists (if being updated)
-    if (updates.employee_code) {
-      const { data: existingCode } = await supabase
-        .from('m_employees')
-        .select('id')
-        .eq('employee_code', updates.employee_code)
-        .neq('id', id)
-        .single()
-
-      if (existingCode) {
-        return { success: false, error: 'Kode pegawai sudah digunakan' }
-      }
+    const result = await updatePegawaiAction(id, updates)
+    if (!result.success) {
+      return { success: false, error: result.error }
     }
-
-    // Check if NIK already exists (if being updated)
-    if (updates.nik) {
-      const { data: existingNik } = await supabase
-        .from('m_employees')
-        .select('id')
-        .eq('nik', updates.nik)
-        .neq('id', id)
-        .single()
-
-      if (existingNik) {
-        return { success: false, error: 'NIK sudah terdaftar' }
-      }
-    }
-
-    // Update pegawai record
-    const { error } = await supabase
-      .from('m_employees')
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
-
-    if (error) {
-      return { success: false, error: error.message }
-    }
-
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }

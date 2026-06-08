@@ -12,7 +12,8 @@
         "execute_sql",
         "get_logs",
         "search_docs"
-      ]
+      ],
+      "disabled": false
     }
   }
 }

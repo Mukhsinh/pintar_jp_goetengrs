@@ -379,7 +379,7 @@ const KPITree = memo(function KPITree({
                                                 title={criterion.label}
                                               >
                                                 <span className="font-bold">{formatNumber(criterion.score || 0)}</span>
-                                                <span className="opacity-70">({criterion.label})</span>
+                                                <span className="text-[10px] font-medium leading-none">({criterion.label})</span>
                                               </span>
                                             )) || []
                                           )}

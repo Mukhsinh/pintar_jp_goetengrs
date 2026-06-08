@@ -70,7 +70,7 @@ export async function createSubIndicator(formData: {
       .eq('indicator_id', formData.indicator_id)
       .eq('is_active', true)
 
-    const totalExistingWeight = existingSubs?.reduce((sum, sub) => sum + Number(sum.weight_percentage), 0) || 0
+    const totalExistingWeight = existingSubs?.reduce((sum, sub) => sum + Number(sub.weight_percentage), 0) || 0
     const newTotalWeight = totalExistingWeight + formData.weight_percentage
 
     if (newTotalWeight > 100.01) { // Allow small floating point tolerance
@@ -80,8 +80,18 @@ export async function createSubIndicator(formData: {
     const { data, error } = await supabase
       .from('m_kpi_sub_indicators')
       .insert({
-        ...formData,
+        indicator_id: formData.indicator_id,
         code: newCode,
+        name: formData.name,
+        description: formData.description,
+        weight_percentage: formData.weight_percentage,
+        target_value: formData.target_value,
+        measurement_unit: formData.measurement_unit,
+        scoring_criteria: formData.scoring_criteria,
+        measurement_type: formData.measurement_type,
+        unit_tariff: formData.unit_tariff || 0,
+        base_index_value: formData.base_index_value || 0,
+        service_types: formData.service_types || [],
         is_active: true
       })
       .select()
@@ -171,7 +181,18 @@ export async function updateSubIndicator(id: string, formData: {
 
     const { data, error } = await supabase
       .from('m_kpi_sub_indicators')
-      .update(formData)
+      .update({
+        name: formData.name,
+        description: formData.description,
+        weight_percentage: formData.weight_percentage,
+        target_value: formData.target_value,
+        measurement_unit: formData.measurement_unit,
+        scoring_criteria: formData.scoring_criteria,
+        measurement_type: formData.measurement_type,
+        unit_tariff: formData.unit_tariff || 0,
+        base_index_value: formData.base_index_value || 0,
+        service_types: formData.service_types || []
+      })
       .eq('id', id)
       .select()
       .single()

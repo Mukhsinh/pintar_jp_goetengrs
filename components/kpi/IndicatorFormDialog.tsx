@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Plus, Trash2, AlertCircle } from 'lucide-react'
 import type { KPICategory, KPIIndicator, KPISubIndicator, ScoringCriterion } from '@/lib/types/kpi.types'
+import { createIndicator, updateIndicator } from '@/app/actions/indicator-actions'
 import { createSubIndicator, updateSubIndicator } from '@/app/actions/sub-indicator-actions'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -61,7 +62,7 @@ export default function IndicatorFormDialog({
     name: '',
     weight_percentage: '',
     description: '',
-    basic_index_value: '0.0000',
+    indicator_base_value: '0.0000', // Renamed from basic_index_value for state
     calculation_method: 'indexing' as 'indexing' | 'priority',
     // Sub-indicator fields (used if hasSubIndicators is false)
     measurement_type: 'scoring' as 'scoring' | 'quantitative',
@@ -121,7 +122,7 @@ export default function IndicatorFormDialog({
         name: indicator.name,
         weight_percentage: indicator.weight_percentage.toString(),
         description: indicator.description || '',
-        basic_index_value: indicator.basic_index_value?.toString() || '0.0000',
+        indicator_base_value: indicator.base_index_value?.toString() || '0.0000',
         calculation_method: (indicator.calculation_method as 'indexing' | 'priority') || 'indexing',
         measurement_type: 'scoring',
         scoring_criteria: [
@@ -143,7 +144,7 @@ export default function IndicatorFormDialog({
         name: '',
         weight_percentage: '',
         description: '',
-        basic_index_value: '0.0000',
+        indicator_base_value: '0.0000',
         calculation_method: 'indexing',
         measurement_type: 'scoring',
         scoring_criteria: [
@@ -235,8 +236,8 @@ export default function IndicatorFormDialog({
     }
 
     if (formData.calculation_method === 'priority' || category?.configuration_style === 'activity') {
-      if (!formData.basic_index_value || parseFloat(formData.basic_index_value) <= 0) {
-        newErrors.basic_index_value = 'Tarif dasar wajib diisi dan lebih besar dari 0'
+      if (!formData.indicator_base_value || parseFloat(formData.indicator_base_value) <= 0) {
+        newErrors.indicator_base_value = 'Tarif dasar wajib diisi dan lebih besar dari 0'
       }
     }
 
@@ -285,29 +286,24 @@ export default function IndicatorFormDialog({
         weight_percentage: (category?.is_weighted === false || formData.calculation_method === 'priority') ? 0 : parseFloat(formData.weight_percentage),
         measurement_unit: null,
         description: formData.description.trim() || null,
-        is_active: true,
-        basic_index_value: (formData.calculation_method === 'priority' || category?.configuration_style === 'activity') ? parseFloat(formData.basic_index_value) : null,
-        calculation_method: formData.calculation_method
+        base_index_value: (formData.calculation_method === 'priority' || category?.configuration_style === 'activity')
+          ? parseFloat(formData.indicator_base_value || '0')
+          : (formData.base_index_value ? parseFloat(formData.base_index_value) : 0),
+        calculation_method: formData.calculation_method,
+        measurement_type: formData.measurement_type,
+        unit_tariff: formData.unit_tariff ? parseFloat(formData.unit_tariff) : 0,
+        service_types: formData.service_types
       }
 
-      let indicatorId = indicator?.id
+      let result
       if (indicator) {
-        const { error } = await supabase
-          .from('m_kpi_indicators')
-          .update(data)
-          .eq('id', indicator.id)
-
-        if (error) throw error
+        result = await updateIndicator(indicator.id, data as any)
       } else {
-        const { data: newIndicator, error } = await supabase
-          .from('m_kpi_indicators')
-          .insert(data)
-          .select()
-          .single()
-
-        if (error) throw error
-        indicatorId = newIndicator.id
+        result = await createIndicator(data as any)
       }
+
+      if (!result.success) throw new Error(result.error)
+      const indicatorId = result.data.id
 
       if (!hasSubIndicators && indicatorId) {
         const subData = {
@@ -456,18 +452,18 @@ export default function IndicatorFormDialog({
             {/* Basic Index Value (Activity or Priority) */}
             {(category?.configuration_style === 'activity' || formData.calculation_method === 'priority') && (
               <div className="space-y-2">
-                <Label htmlFor="basic_index_value">Tarif Dasar / Nilai Rupiah *</Label>
+                <Label htmlFor="indicator_base_value">Tarif Dasar / Nilai Rupiah *</Label>
                 <Input
-                  id="basic_index_value"
+                  id="indicator_base_value"
                   type="number"
                   step="0.0001"
                   min="0"
-                  value={formData.basic_index_value}
-                  onChange={(e) => setFormData({ ...formData, basic_index_value: e.target.value })}
+                  value={formData.indicator_base_value}
+                  onChange={(e) => setFormData({ ...formData, indicator_base_value: e.target.value })}
                   placeholder="contoh: 0.1250"
                 />
-                {errors.basic_index_value && (
-                  <p className="text-sm text-red-600">{errors.basic_index_value}</p>
+                {errors.indicator_base_value && (
+                  <p className="text-sm text-red-600">{errors.indicator_base_value}</p>
                 )}
                 <p className="text-xs text-gray-500">
                   Nilai tarif pengali atau nilai rupiah langsung. Digunakan untuk metode Berbasis Aktivitas atau Priority.

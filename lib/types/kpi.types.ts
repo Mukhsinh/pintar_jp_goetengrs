@@ -22,7 +22,7 @@ export interface KPIIndicator {
   measurement_unit: string | null
   description: string | null
   is_active: boolean
-  basic_index_value?: number | null
+  base_index_value?: number | null
   calculation_method?: 'indexing' | 'priority' | null
 }
 

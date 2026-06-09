@@ -53,9 +53,7 @@ export async function getPegawaiWithUnits(
     // Transform data to match Pegawai type
     const transformedData: Pegawai[] = (data || []).map((item: any) => ({
       ...item,
-      m_units: Array.isArray(item.m_units) && item.m_units.length > 0
-        ? item.m_units[0]
-        : undefined
+      m_units: item.m_units || undefined
     }))
 
     return { data: transformedData, count: count || 0 }
@@ -68,36 +66,41 @@ export async function getPegawaiWithUnits(
 /**
  * Server action to create new pegawai
  */
-export async function createPegawai(data: CreatePegawaiData): Promise<{ success: boolean; error?: string }> {
+export async function createPegawai(data: CreatePegawaiData) {
   try {
-    const supabase = await createClient()
+    const supabase = await createAdminClient()
 
-    // Verify user is superadmin
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user || user.user_metadata?.role !== 'superadmin') {
-      return { success: false, error: 'Tidak memiliki akses' }
-    }
+    // Fetch global tax mechanism from settings
+    const { data: taxSetting } = await supabase
+      .from('t_settings')
+      .select('value')
+      .eq('key', 'tax_config')
+      .single()
 
-    // Use admin client to bypass RLS and ensure all columns are written
-    const adminSupabase = await createAdminClient()
+    const mechanism = (taxSetting?.value as any)?.mechanism || 'TER'
+    const taxType = mechanism === 'ter' || mechanism === 'TER' ? 'TER' : 'Final'
 
-    const isPNS = (data as any).employment_status === 'PNS'
+    // Log data for debugging
+    console.log('Creating employee with data:', data, 'using taxType:', taxType)
 
-    const { data: insertedData, error } = await adminSupabase
+    const { data: newPegawai, error } = await supabase
       .from('m_employees')
       .insert([{
         employee_code: data.employee_code,
         full_name: data.full_name,
         unit_id: data.unit_id,
-        position: data.position || null,
-        phone: data.phone || null,
-        nik: data.nik || null,
-        bank_name: data.bank_name || null,
-        bank_account_number: data.bank_account_number || null,
-        bank_account_name: data.bank_account_name || null,
         tax_status: data.tax_status || 'TK/0',
-        employment_status: (data as any).employment_status || 'ASN',
-        pns_grade: String((data as any).pns_grade || '3'),
+        tax_type: taxType as any,
+        nik: data.nik,
+        bank_name: data.bank_name,
+        bank_account_number: data.bank_account_number,
+        bank_account_name: data.bank_account_name,
+        position: data.position,
+        phone: data.phone,
+        role: data.role || 'employee',
+        employee_status: data.employee_status || 'active',
+        employment_status: data.employment_status || 'PNS',
+        pns_grade: data.pns_grade ? String(data.pns_grade) : null,
         is_active: data.is_active !== undefined ? data.is_active : true,
       }])
       .select()
@@ -145,7 +148,8 @@ export async function updatePegawai(id: string, data: UpdatePegawaiData): Promis
         bank_account_number: data.bank_account_number,
         bank_account_name: data.bank_account_name,
         tax_status: data.tax_status,
-        employment_status: (data as any).employment_status,
+        tax_type: data.tax_type,
+        employment_status: data.employment_status,
         pns_grade: data.pns_grade !== undefined ? String(data.pns_grade) : undefined,
         is_active: data.is_active,
         updated_at: new Date().toISOString()

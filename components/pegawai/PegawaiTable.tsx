@@ -95,8 +95,10 @@ export const PegawaiTable = memo(function PegawaiTable({ pegawai, loading, onEdi
               <td className="p-3 text-xs md:text-sm text-gray-600 hidden lg:table-cell">{p.position || '-'}</td>
               <td className="p-3 hidden sm:table-cell">
                 <span className={`px-2 py-0.5 text-xs md:text-xs rounded-full font-medium ${p.employment_status === 'PNS' ? 'bg-purple-100 text-purple-800' :
-                  p.employment_status === 'PPPK' ? 'bg-green-100 text-green-800' :
-                    'bg-orange-100 text-orange-800'
+                    p.employment_status === 'PPPK' ? 'bg-green-100 text-green-800' :
+                      p.employment_status === 'PPPK PARUH WAKTU' ? 'bg-blue-100 text-blue-800' :
+                        p.employment_status === 'BLUD' ? 'bg-orange-100 text-orange-800' :
+                          'bg-gray-100 text-gray-800'
                   }`}>
                   {p.employment_status || '-'}
                 </span>

@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { ClipboardCheck, Eye, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import dynamic from 'next/dynamic'
 import type { AssessmentStatus } from '@/lib/types/assessment.types'
 
@@ -49,6 +50,7 @@ export default function AssessmentTable({
   }
 
   const handleAssessmentSaved = () => {
+    toast.success('Penilaian berhasil dan tersimpan')
     onAssessmentComplete()
     handleCloseDialog()
   }

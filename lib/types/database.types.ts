@@ -51,7 +51,7 @@ export interface Database {
           role: string
           email: string
           tax_status: string | null
-          employment_status: 'ASN' | 'BLUD' | 'PNS' | 'PPPK' | null
+          employment_status: 'PNS' | 'PPPK' | 'PPPK PARUH WAKTU' | 'BLUD' | null
           employee_status: string | null
           tax_type: 'Final' | 'TER' | null
           pns_grade: string | null
@@ -74,7 +74,7 @@ export interface Database {
           role?: string
           email?: string
           tax_status?: string | null
-          employment_status?: 'ASN' | 'BLUD' | 'PNS' | 'PPPK' | null
+          employment_status?: 'PNS' | 'PPPK' | 'PPPK PARUH WAKTU' | 'BLUD' | null
           employee_status?: string | null
           tax_type?: 'Final' | 'TER' | null
           pns_grade?: string | null
@@ -97,7 +97,7 @@ export interface Database {
           role?: string
           email?: string
           tax_status?: string | null
-          employment_status?: 'ASN' | 'BLUD' | 'PNS' | 'PPPK' | null
+          employment_status?: 'PNS' | 'PPPK' | 'PPPK PARUH WAKTU' | 'BLUD' | null
           employee_status?: string | null
           tax_type?: 'Final' | 'TER' | null
           pns_grade?: string | null
@@ -141,7 +141,7 @@ export interface Pegawai {
   role: string
   email: string
   tax_status: string | null
-  employment_status: 'ASN' | 'BLUD' | 'PNS' | 'PPPK' | null
+  employment_status: 'PNS' | 'PPPK' | 'PPPK PARUH WAKTU' | 'BLUD' | null
   employee_status: string | null
   tax_type: 'Final' | 'TER' | null
   pns_grade: string | null
@@ -185,10 +185,11 @@ export interface CreatePegawaiData {
   bank_account_number?: string | null
   bank_account_name?: string | null
   tax_status?: string | null
-  employment_status?: 'ASN' | 'BLUD' | 'PNS' | 'PPPK' | null
+  employment_status?: 'PNS' | 'PPPK' | 'PPPK PARUH WAKTU' | 'BLUD' | null
   employee_status?: string | null
   tax_type?: 'Final' | 'TER' | null
   pns_grade?: string | null
+  role?: string | null
   is_active?: boolean
 }
 

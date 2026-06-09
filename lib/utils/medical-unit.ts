@@ -16,11 +16,15 @@ export function isMedicalUnit(unitId?: string | null, unitName?: string | null):
     if (unitId && unitId === MEDICAL_UNIT_ID) return true
 
     if (unitName) {
-        const upperName = unitName.toUpperCase()
-        // Explicitly exclude UK25 (TEKNISI MEDIS) and UK26 (TEKNISI NON MEDIS)
-        if (upperName.includes('TEKNISI')) return false
+        const upperName = unitName.toUpperCase().trim()
 
-        if (upperName.includes(MEDICAL_UNIT_NAME_KEYWORD)) return true
+        // Exact match for 'MEDIS' or starts with 'MEDIS ' 
+        // to handle cases like 'MEDIS - DOKTER' but exclude 'REKAM MEDIS'
+        if (upperName === MEDICAL_UNIT_NAME_KEYWORD) return true
+        if (upperName.startsWith(MEDICAL_UNIT_NAME_KEYWORD + ' ')) return true
+
+        // Original logic was too broad (includes), now we only allow 
+        // specific 'MEDIS' unit or the known ID.
     }
 
     return false

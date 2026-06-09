@@ -37,7 +37,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
     full_name: '',
     unit_id: '',
     tax_status: 'TK/0',
-    employment_status: 'ASN',
+    employment_status: 'PNS' as 'PNS' | 'PPPK' | 'PPPK PARUH WAKTU' | 'BLUD',
     pns_grade: '' as string | number,
     position: '',
     phone: '',
@@ -74,7 +74,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
         employee_code: pegawai.employee_code,
         full_name: pegawai.full_name,
         unit_id: pegawai.unit_id,
-        tax_status: pegawai.tax_status,
+        tax_status: pegawai.tax_status || 'TK/0',
         employment_status: pegawai.employment_status || (pegawai.employee_status as any === 'active' ? 'ASN' : (pegawai.employee_status as any || 'ASN')),
         pns_grade: pegawai.pns_grade ? String(pegawai.pns_grade) : '',
         position: pegawai.position || '',
@@ -90,7 +90,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
         full_name: '',
         unit_id: '',
         tax_status: 'TK/0',
-        employment_status: 'ASN',
+        employment_status: 'PNS',
         pns_grade: '',
         position: '',
         phone: '',
@@ -197,7 +197,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
                 onValueChange={(value) => {
                   setFormData(prev => ({
                     ...prev,
-                    employment_status: value,
+                    employment_status: value as any,
                     pns_grade: value === 'PNS' ? (prev.pns_grade || '3') : ''
                   }))
                 }}
@@ -208,6 +208,7 @@ export function PegawaiFormDialog({ open, onClose, onSuccess, pegawai }: Pegawai
                 <SelectContent>
                   <SelectItem value="PNS">PNS</SelectItem>
                   <SelectItem value="PPPK">PPPK</SelectItem>
+                  <SelectItem value="PPPK PARUH WAKTU">PPPK PARUH WAKTU</SelectItem>
                   <SelectItem value="BLUD">BLUD</SelectItem>
                 </SelectContent>
               </Select>

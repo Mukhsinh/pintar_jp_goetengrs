@@ -62,19 +62,56 @@ export default function LoginPage() {
     if (isLoading) return
     setIsLoading(true)
     setError(null)
+
     try {
       const supabase = createClient()
+
+      // Clear any existing session to ensure clean login
       await supabase.auth.signOut({ scope: 'local' })
+
+      // Perform sign in
       const { data: auth, error: authErr } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password,
       })
-      if (authErr) { setError(authErr.message || 'Email atau kata sandi salah'); setShowClear(true); setIsLoading(false); return }
-      if (!auth.user) { setError('Gagal membuat sesi, silakan coba lagi'); setIsLoading(false); return }
-      try { await fetch('/api/users/sync-role', { method: 'POST' }) } catch { /* ignore */ }
-      window.location.href = '/dashboard'
-    } catch {
-      setError('Terjadi kesalahan sistem, silakan coba lagi')
+
+      if (authErr) {
+        setError(authErr.message || 'Email atau kata sandi salah')
+        setShowClear(true)
+        setIsLoading(false)
+        return
+      }
+
+      if (!auth.user || !auth.session) {
+        setError('Gagal membuat sesi, silakan coba lagi')
+        setIsLoading(false)
+        return
+      }
+
+      // Sync role and wait for it
+      try {
+        const syncResponse = await fetch('/api/users/sync-role', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+        if (!syncResponse.ok) {
+          console.warn('[LOGIN] Sync role returned status:', syncResponse.status)
+        }
+      } catch (syncErr) {
+        console.error('[LOGIN] Sync role failed:', syncErr)
+      }
+
+      // Small delay to ensure cookies are processed by the browser
+      // and available for the middleware in the next request
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // Use replace instead of href to prevent back-button issues
+      window.location.replace('/dashboard')
+    } catch (err: any) {
+      console.error('[LOGIN] Unexpected error:', err)
+      setError('Terjadi kesalahan sistem: ' + (err.message || 'Silakan coba lagi'))
       setShowClear(true)
       setIsLoading(false)
     }

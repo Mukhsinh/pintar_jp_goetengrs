@@ -107,16 +107,13 @@ export async function middleware(request: NextRequest) {
             return request.cookies.get(name)?.value
           },
           set(name: string, value: string, options: CookieOptions) {
+            // Update request cookies so subsequent calls to get work
             request.cookies.set({
               name,
               value,
               ...options,
             })
-            response = NextResponse.next({
-              request: {
-                headers: request.headers,
-              },
-            })
+            // Set cookie on the same response object to accumulate all cookies
             response.cookies.set({
               name,
               value,
@@ -128,11 +125,6 @@ export async function middleware(request: NextRequest) {
               name,
               value: '',
               ...options,
-            })
-            response = NextResponse.next({
-              request: {
-                headers: request.headers,
-              },
             })
             response.cookies.set({
               name,

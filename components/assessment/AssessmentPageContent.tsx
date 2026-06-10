@@ -34,6 +34,7 @@ export default function AssessmentPageContent({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [isAddPeriodDialogOpen, setIsAddPeriodDialogOpen] = useState(false)
   const [summary, setSummary] = useState({
@@ -109,15 +110,24 @@ export default function AssessmentPageContent({
     }
   }
 
+  // Debounce search term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
   // Filter employees based on search and status
   useEffect(() => {
     let filtered = employees
 
     // Apply search filter
-    if (searchTerm) {
+    if (debouncedSearchTerm) {
+      const lowerSearch = debouncedSearchTerm.toLowerCase()
       filtered = filtered.filter(emp =>
-        emp.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        emp.unit_name.toLowerCase().includes(searchTerm.toLowerCase())
+        emp.full_name.toLowerCase().includes(lowerSearch) ||
+        emp.unit_name.toLowerCase().includes(lowerSearch)
       )
     }
 
@@ -127,7 +137,7 @@ export default function AssessmentPageContent({
     }
 
     setFilteredEmployees(filtered)
-  }, [employees, searchTerm, statusFilter])
+  }, [employees, debouncedSearchTerm, statusFilter])
 
   // Load data when period changes
   useEffect(() => {

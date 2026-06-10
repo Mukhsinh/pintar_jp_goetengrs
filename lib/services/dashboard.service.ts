@@ -150,46 +150,54 @@ export class DashboardService {
 
       const assessments = assessmentsRes.data || []
 
-      const calcEmployeeTotalScore = (empId: string) => {
-        const empAssessments = assessments.filter((a: any) => a.employee_id === empId)
-        if (empAssessments.length === 0) return 0
+      // Efficiently group assessments by employee and category in one pass
+      const empDataMap = new Map<string, { [key: string]: any[] }>()
+      for (const a of assessments) {
+        const empId = a.employee_id
+        if (!empDataMap.has(empId)) {
+          empDataMap.set(empId, { P1: [], P2: [], P3: [] })
+        }
 
-        const calcCategoryScore = (categoryName: string) => {
-          const catAssessments = empAssessments.filter((a: any) => {
-            const indicator = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators;
-            const category = indicator?.m_kpi_categories;
-            const catName = Array.isArray(category) ? category[0]?.category : category?.category;
-            return catName === categoryName;
-          })
-          if (catAssessments.length === 0) return 0
+        const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
+        const categoryObj = indicator?.m_kpi_categories
+        const catName = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
 
-          const firstAss = catAssessments[0] as any;
-          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any;
-          const categoryObj = (indicator?.m_kpi_categories) as any;
+        if (catName && empDataMap.get(empId)![catName]) {
+          empDataMap.get(empId)![catName].push(a)
+        }
+      }
+
+      const calculateScore = (empId: string) => {
+        const cats = empDataMap.get(empId)
+        if (!cats) return 0
+
+        let totalScore = 0
+        for (const catName of ['P1', 'P2', 'P3']) {
+          const catAssessments = cats[catName]
+          if (catAssessments.length === 0) continue
+
+          const firstAss: any = catAssessments[0]
+          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any
+          const categoryObj = indicator?.m_kpi_categories as any
           const categoryWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
 
           let totalRealisasi = 0
           let totalTarget = 0
-
-          for (const a of (catAssessments as any[])) {
+          for (const a of catAssessments) {
             const indWeight = parseFloat(a.weight_percentage) || 0
-            const indRealisasi = parseFloat(a.realization_value) || 0
-            const indTarget = parseFloat(a.target_value) || 100
-            totalRealisasi += indRealisasi * (indWeight / 100)
-            totalTarget += indTarget * (indWeight / 100)
+            totalRealisasi += (parseFloat(a.realization_value) || 0) * (indWeight / 100)
+            totalTarget += (parseFloat(a.target_value) || 100) * (indWeight / 100)
           }
 
           if (totalTarget > 0) {
-            return (totalRealisasi / totalTarget) * categoryWeight
+            totalScore += (totalRealisasi / totalTarget) * categoryWeight
           }
-          return 0
         }
-
-        return calcCategoryScore('P1') + calcCategoryScore('P2') + calcCategoryScore('P3')
+        return totalScore
       }
 
-      const uniqueAssessedEmployees = Array.from(new Set(assessments.map(a => a.employee_id)))
-      const employeeScores = uniqueAssessedEmployees.map(empId => calcEmployeeTotalScore(empId as string))
+      const uniqueAssessedEmployees = Array.from(empDataMap.keys())
+      const employeeScores = uniqueAssessedEmployees.map(empId => calculateScore(empId))
 
       const avgScore = employeeScores.length > 0
         ? employeeScores.reduce((sum, score) => sum + score, 0) / employeeScores.length
@@ -277,71 +285,71 @@ export class DashboardService {
         return []
       }
 
-      // Aggregate scores per employee using bottom-up system
-      const employeeScores: Record<string, { name: string; unit: string; totalScore: number }> = {}
-
-      // First, group assessments by employee
-      const employeeAssessedMap = new Map<string, any[]>()
+      // Efficiently group assessments by employee and category in one pass
+      const empDataMap = new Map<string, { info: any, cats: { [key: string]: any[] } }>()
       for (const a of (assessments || [])) {
         const emp = a.m_employees as any
         if (!emp || !emp.is_active) continue
 
         const empId = emp.id
-        if (!employeeAssessedMap.has(empId)) {
-          employeeAssessedMap.set(empId, [])
-          employeeScores[empId] = {
-            name: emp.full_name || 'Unknown',
-            unit: emp.m_units?.name || 'Unknown',
-            totalScore: 0
-          }
+        if (!empDataMap.has(empId)) {
+          empDataMap.set(empId, {
+            info: {
+              name: emp.full_name || 'Unknown',
+              unit: emp.m_units?.name || 'Unknown'
+            },
+            cats: { P1: [], P2: [], P3: [] }
+          })
         }
-        employeeAssessedMap.get(empId)!.push(a)
+
+        const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
+        const categoryObj = indicator?.m_kpi_categories
+        const catName = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
+
+        if (catName && empDataMap.get(empId)!.cats[catName]) {
+          empDataMap.get(empId)!.cats[catName].push(a)
+        }
       }
 
-      // Then calculate per employee score
-      for (const [empId, acts] of employeeAssessedMap.entries()) {
-        const calcCategoryScore = (categoryName: string) => {
-          const catAssessments = acts.filter((a: any) => {
-            const indicator = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators;
-            const categoryData = indicator?.m_kpi_categories;
-            const catName = Array.isArray(categoryData) ? categoryData[0]?.category : categoryData?.category;
-            return catName === categoryName;
-          })
-          if (catAssessments.length === 0) return 0
+      // Calculate total score per employee
+      const employeeScores = Array.from(empDataMap.entries()).map(([empId, data]) => {
+        let totalScore = 0
+        for (const catName of ['P1', 'P2', 'P3']) {
+          const catAssessments = data.cats[catName]
+          if (catAssessments.length === 0) continue
 
-          const firstAss = catAssessments[0] as any;
-          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any;
-          const categoryObj = indicator?.m_kpi_categories as any;
+          const firstAss: any = catAssessments[0]
+          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any
+          const categoryObj = indicator?.m_kpi_categories as any
           const categoryWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
 
-          let totalRealisasi = 0
-          let totalTarget = 0
-          for (const a of (catAssessments as any[])) {
-            const indWeight = parseFloat(a.weight_percentage) || 0
-            const indRealisasi = parseFloat(a.realization_value) || 0
-            const indTarget = parseFloat(a.target_value) || 100
-            totalRealisasi += indRealisasi * (indWeight / 100)
-            totalTarget += indTarget * (indWeight / 100)
+          let totalR = 0, totalT = 0
+          for (const a of catAssessments) {
+            const w = parseFloat((a as any).weight_percentage) || 0
+            totalR += (parseFloat((a as any).realization_value) || 0) * (w / 100)
+            totalT += (parseFloat((a as any).target_value) || 100) * (w / 100)
           }
-          if (totalTarget > 0) return (totalRealisasi / totalTarget) * categoryWeight
-          return 0
+          if (totalT > 0) totalScore += (totalR / totalT) * categoryWeight
         }
 
-        employeeScores[empId].totalScore = calcCategoryScore('P1') + calcCategoryScore('P2') + calcCategoryScore('P3')
-      }
+        return {
+          id: empId,
+          name: data.info.name,
+          unit: data.info.unit,
+          score: Math.round(totalScore * 100) / 100
+        }
+      })
 
-      // Calculate averages & sort
-      const sorted = Object.entries(employeeScores)
-        .map(([id, data]) => ({
-          id,
-          name: data.name,
-          unit: data.unit,
-          score: Math.round(data.totalScore * 100) / 100
-        }))
+      // Sort and format for return
+      const sorted = employeeScores
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
+        .map((p, i) => ({
+          ...p,
+          rank: i + 1
+        }))
 
-      return sorted.map((p, i) => ({ ...p, rank: i + 1 }))
+      return sorted
     } catch (error) {
       console.error('Error in getTopPerformers:', error)
       return []
@@ -392,71 +400,71 @@ export class DashboardService {
         return []
       }
 
-      // Aggregate scores per employee
-      const employeeScores: Record<string, { name: string; unit: string; totalScore: number }> = {}
-
-      // First, group assessments by employee
-      const employeeAssessedMap = new Map<string, any[]>()
+      // Efficiently group assessments by employee and category in one pass
+      const empDataMap = new Map<string, { info: any, cats: { [key: string]: any[] } }>()
       for (const a of (assessments || [])) {
         const emp = a.m_employees as any
         if (!emp || !emp.is_active) continue
 
         const empId = emp.id
-        if (!employeeAssessedMap.has(empId)) {
-          employeeAssessedMap.set(empId, [])
-          employeeScores[empId] = {
-            name: emp.full_name || 'Unknown',
-            unit: emp.m_units?.name || 'Unknown',
-            totalScore: 0
-          }
+        if (!empDataMap.has(empId)) {
+          empDataMap.set(empId, {
+            info: {
+              name: emp.full_name || 'Unknown',
+              unit: emp.m_units?.name || 'Unknown'
+            },
+            cats: { P1: [], P2: [], P3: [] }
+          })
         }
-        employeeAssessedMap.get(empId)!.push(a)
+
+        const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
+        const categoryObj = indicator?.m_kpi_categories
+        const catName = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
+
+        if (catName && empDataMap.get(empId)!.cats[catName]) {
+          empDataMap.get(empId)!.cats[catName].push(a)
+        }
       }
 
-      // Then calculate per employee score
-      for (const [empId, acts] of employeeAssessedMap.entries()) {
-        const calcCategoryScore = (categoryName: string) => {
-          const catAssessments = acts.filter((a: any) => {
-            const indicator = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators;
-            const categoryData = indicator?.m_kpi_categories;
-            const catName = Array.isArray(categoryData) ? categoryData[0]?.category : categoryData?.category;
-            return catName === categoryName;
-          })
-          if (catAssessments.length === 0) return 0
+      // Calculate total score per employee
+      const employeeScores = Array.from(empDataMap.entries()).map(([empId, data]) => {
+        let totalScore = 0
+        for (const catName of ['P1', 'P2', 'P3']) {
+          const catAssessments = data.cats[catName]
+          if (catAssessments.length === 0) continue
 
-          const firstAss = catAssessments[0] as any;
-          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any;
-          const categoryObj = indicator?.m_kpi_categories as any;
+          const firstAss: any = catAssessments[0]
+          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any
+          const categoryObj = indicator?.m_kpi_categories as any
           const categoryWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
 
-          let totalRealisasi = 0
-          let totalTarget = 0
-          for (const a of (catAssessments as any[])) {
-            const indWeight = parseFloat(a.weight_percentage) || 0
-            const indRealisasi = parseFloat(a.realization_value) || 0
-            const indTarget = parseFloat(a.target_value) || 100
-            totalRealisasi += indRealisasi * (indWeight / 100)
-            totalTarget += indTarget * (indWeight / 100)
+          let totalR = 0, totalT = 0
+          for (const a of catAssessments) {
+            const w = parseFloat((a as any).weight_percentage) || 0
+            totalR += (parseFloat((a as any).realization_value) || 0) * (w / 100)
+            totalT += (parseFloat((a as any).target_value) || 100) * (w / 100)
           }
-          if (totalTarget > 0) return (totalRealisasi / totalTarget) * categoryWeight
-          return 0
+          if (totalT > 0) totalScore += (totalR / totalT) * categoryWeight
         }
 
-        employeeScores[empId].totalScore = calcCategoryScore('P1') + calcCategoryScore('P2') + calcCategoryScore('P3')
-      }
+        return {
+          id: empId,
+          name: data.info.name,
+          unit: data.info.unit,
+          score: Math.round(totalScore * 100) / 100
+        }
+      })
 
-      // Calculate averages & sort ascending (worst first)
-      const sorted = Object.entries(employeeScores)
-        .map(([id, data]) => ({
-          id,
-          name: data.name,
-          unit: data.unit,
-          score: Math.round(data.totalScore * 100) / 100
-        }))
+      // Sort and format for return (worst first)
+      const sorted = employeeScores
         .sort((a, b) => a.score - b.score)
         .slice(0, limit)
+        .map((p, i) => ({
+          ...p,
+          rank: i + 1
+        }))
 
-      return sorted.map((p, i) => ({ ...p, rank: i + 1 }))
+      return sorted
     } catch (error) {
       console.error('Error in getWorstPerformers:', error)
       return []
@@ -776,29 +784,38 @@ export class DashboardService {
       let p1Sum = 0, p2Sum = 0, p3Sum = 0
       let empCount = 0
 
-      for (const empId of empIds) {
-        const empAss = (assessments || []).filter(a => a.employee_id === empId)
+      // Efficiently group assessments by employee and category in one pass
+      const empDataMap = new Map<string, { [key: string]: any[] }>()
+      for (const a of (assessments || [])) {
+        const empId = a.employee_id
+        if (!empDataMap.has(empId)) {
+          empDataMap.set(empId, { P1: [], P2: [], P3: [] })
+        }
 
+        const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
+        const categoryObj = indicator?.m_kpi_categories
+        const catName = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
+
+        if (catName && empDataMap.get(empId)![catName]) {
+          empDataMap.get(empId)![catName].push(a)
+        }
+      }
+
+      for (const [empId, cats] of empDataMap.entries()) {
         const calcCatContrib = (catName: string) => {
-          const catAss = empAss.filter(a => {
-            const indicator = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
-            const categoryObj = indicator?.m_kpi_categories
-            const cat = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
-            return cat === catName
-          })
-
+          const catAss = cats[catName]
           if (catAss.length === 0) return 0
 
           const first = catAss[0]
-          const indicator = Array.isArray(first.m_kpi_indicators) ? first.m_kpi_indicators[0] : first.m_kpi_indicators
-          const categoryObj = indicator?.m_kpi_categories
+          const indicator = (Array.isArray(first.m_kpi_indicators) ? first.m_kpi_indicators[0] : first.m_kpi_indicators) as any
+          const categoryObj = indicator?.m_kpi_categories as any
           const catWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
 
           let totalR = 0, totalT = 0
           for (const a of catAss) {
-            const w = parseFloat(a.weight_percentage) || 0
-            totalR += (parseFloat(a.realization_value) || 0) * (w / 100)
-            totalT += (parseFloat(a.target_value) || 100) * (w / 100)
+            const w = parseFloat((a as any).weight_percentage) || 0
+            totalR += (parseFloat((a as any).realization_value) || 0) * (w / 100)
+            totalT += (parseFloat((a as any).target_value) || 100) * (w / 100)
           }
 
           return totalT > 0 ? (totalR / totalT) * catWeight : 0

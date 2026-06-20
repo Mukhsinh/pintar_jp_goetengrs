@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { generateUserListPDF } from '@/lib/export/pdf-export'
 
 export interface UserWithPegawai {
   id: string
@@ -21,6 +22,7 @@ export interface UserWithPegawai {
   unit: {
     id: string
     name: string
+    code?: string
   } | null
 }
 
@@ -67,7 +69,7 @@ export async function getUsers(
         role,
         created_at,
         updated_at,
-        m_units(id, name)
+        m_units(id, name, code)
       `, { count: 'exact' })
       .not('user_id', 'is', null)
       .order('created_at', { ascending: false })
@@ -173,5 +175,33 @@ export async function getEmployeesForUserCreation(): Promise<{ data: any[]; erro
   } catch (err: any) {
     console.error('getEmployeesForUserCreation error:', err)
     return { data: [], error: err.message || 'Terjadi kesalahan' }
+  }
+}
+
+/**
+ * Server action to export user list to PDF
+ */
+export async function exportUserListToPDF(): Promise<{ data?: string; error?: string }> {
+  try {
+    const { data: users, error } = await getUsers(1, 1000) // Get top 1000 users for export
+
+    if (error) throw new Error(error)
+
+    const formattedData = users.map(u => ({
+      username: u.role === 'superadmin' ? 'admin' : (u.email.split('@')[0]),
+      display_name: u.pegawai?.full_name || '-',
+      unit_name: u.unit?.name || '-',
+      unit_code: u.unit?.code || '-',
+      role_name: u.role === 'superadmin' ? 'Super Admin' : (u.role === 'unit_manager' ? 'Manajer Unit' : 'Pegawai'),
+      is_active: u.is_active
+    }))
+
+    const pdfBytes = await generateUserListPDF(formattedData)
+    const base64 = Buffer.from(pdfBytes).toString('base64')
+
+    return { data: base64 }
+  } catch (err: any) {
+    console.error('exportUserListToPDF error:', err)
+    return { error: err.message || 'Gagal mengekspor PDF' }
   }
 }

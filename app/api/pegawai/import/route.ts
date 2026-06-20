@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import * as XLSX from 'xlsx'
 
-export const maxDuration = 60 // Allow up to 60s for large imports
+export const maxDuration = 300 // Allow up to 5 minutes for large imports
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,228 +47,265 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Tidak ada data di dalam file Excel' }, { status: 400 })
     }
 
-    // Log headers for debugging
-    const firstRow = rawData[0]
-    console.log(`[IMPORT PEGAWAI] Headers found:`, Object.keys(firstRow))
-    console.log(`[IMPORT PEGAWAI] Total rows: ${rawData.length}`)
-
     // Flexible Header Mapping Utility
     const getVal = (row: Record<string, any>, possibleKeys: string[]) => {
       for (const key of possibleKeys) {
         if (row[key] !== undefined && row[key] !== '') return row[key]
-        // Case-insensitive + trimmed fallback
         const foundKey = Object.keys(row).find(k => k.trim().toLowerCase() === key.toLowerCase())
         if (foundKey && row[foundKey] !== undefined && row[foundKey] !== '') return row[foundKey]
       }
       return undefined
     }
 
+    // Truncate utility to prevent DB errors
+    const trunc = (val: any, limit: number) => {
+      if (val === undefined || val === null) return null
+      const s = val.toString().trim()
+      return s.length > limit ? s.substring(0, limit) : s
+    }
+
+    // Normalize employment_status to match DB CHECK constraint
+    // Allowed values: 'ASN', 'BLUD', 'PNS', 'PPPK', 'PPPK PARUH WAKTU', 'NON ASN', 'HONORER', 'THL', 'TENAGA KONTRAK'
+    const normalizeEmploymentStatus = (raw: any): string => {
+      if (raw === undefined || raw === null || raw.toString().trim() === '') return 'BLUD'
+      const val = raw.toString().trim().toUpperCase()
+
+      // Exact match first
+      const validStatuses = ['ASN', 'BLUD', 'PNS', 'PPPK', 'PPPK PARUH WAKTU', 'NON ASN', 'HONORER', 'THL', 'TENAGA KONTRAK']
+      if (validStatuses.includes(val)) return val
+
+      // Fuzzy matching for common variations
+      const mapping: Record<string, string> = {
+        // PNS variations
+        'PEGAWAI NEGERI SIPIL': 'PNS',
+        'PEGAWAI NEGERI': 'PNS',
+        'P.N.S': 'PNS',
+        'P.N.S.': 'PNS',
+        // ASN variations
+        'APARATUR SIPIL NEGARA': 'ASN',
+        'A.S.N': 'ASN',
+        'A.S.N.': 'ASN',
+        // PPPK variations
+        'P3K': 'PPPK',
+        'PPPK PARUH': 'PPPK PARUH WAKTU',
+        'PPPK PW': 'PPPK PARUH WAKTU',
+        'P3K PARUH WAKTU': 'PPPK PARUH WAKTU',
+        'PEGAWAI PEMERINTAH': 'PPPK',
+        'PEGAWAI PEMERINTAH DENGAN PERJANJIAN KERJA': 'PPPK',
+        // BLUD variations
+        'B.L.U.D': 'BLUD',
+        'B.L.U.D.': 'BLUD',
+        'BADAN LAYANAN UMUM DAERAH': 'BLUD',
+        'BADAN LAYANAN UMUM': 'BLUD',
+        'BLU': 'BLUD',
+        // NON ASN variations
+        'NON-ASN': 'NON ASN',
+        'NON_ASN': 'NON ASN',
+        'NONASN': 'NON ASN',
+        'NON PNS': 'NON ASN',
+        'NON-PNS': 'NON ASN',
+        'NON_PNS': 'NON ASN',
+        'NONPNS': 'NON ASN',
+        'NABAN': 'NON ASN',
+        'NON APARATUR': 'NON ASN',
+        // HONORER variations
+        'HONOR': 'HONORER',
+        'HONORER DAERAH': 'HONORER',
+        'TENAGA HONORER': 'HONORER',
+        'PTT': 'HONORER',
+        // THL variations
+        'TENAGA HARIAN LEPAS': 'THL',
+        'HARIAN LEPAS': 'THL',
+        'HARIAN': 'THL',
+        // TENAGA KONTRAK variations
+        'KONTRAK': 'TENAGA KONTRAK',
+        'TK': 'TENAGA KONTRAK',
+        'TENAGA KONTRAK DAERAH': 'TENAGA KONTRAK',
+        'TKHL': 'TENAGA KONTRAK',
+        'OUTSOURCING': 'TENAGA KONTRAK',
+        'OS': 'TENAGA KONTRAK',
+        'MAGANG': 'TENAGA KONTRAK',
+        // Common hospital staff abbreviations
+        'AMK': 'BLUD',
+        'AMAK': 'BLUD',
+        'SKM': 'BLUD',
+        'S.KEP': 'BLUD',
+        'NS': 'BLUD',
+        'DR': 'BLUD',
+        'DRG': 'BLUD',
+        'APT': 'BLUD',
+      }
+
+      // Check exact mapping
+      if (mapping[val]) return mapping[val]
+
+      // Check if the value contains a valid status keyword
+      for (const status of validStatuses) {
+        if (val.includes(status)) return status
+      }
+
+      // Check partial mapping match
+      for (const [key, mapped] of Object.entries(mapping)) {
+        if (val.includes(key)) return mapped
+      }
+
+      // Default fallback - BLUD for unrecognized values
+      return 'BLUD'
+    }
+
+    const normalizeTaxStatus = (status: any): string => {
+      if (!status) return 'TK/0'
+      let val = String(status).toUpperCase().replace(/\s+/g, '')
+
+      // Remove common separators and re-add standard one
+      val = val.replace(/[\/\-_]/g, '')
+
+      let normalized = val
+      if (val.startsWith('TK')) {
+        normalized = 'TK/' + val.slice(2)
+      } else if (val.startsWith('K')) {
+        normalized = 'K/' + val.slice(1)
+      }
+
+      const validTaxStatuses = ['TK/0', 'TK/1', 'TK/2', 'TK/3', 'K/0', 'K/1', 'K/2', 'K/3']
+      if (validTaxStatuses.includes(normalized)) return normalized
+
+      // Final attempt: check if it contains any valid status
+      for (const valid of validTaxStatuses) {
+        if (normalized.includes(valid.replace('/', ''))) return valid
+      }
+
+      return 'TK/0' // Fallback
+    }
+
     const results = {
       success: 0,
       failed: 0,
-      errors: [] as string[],
+      failedRows: [] as any[],
       total: rawData.length,
     }
 
-    // --- PRE-FETCH: Load all units and auth users once BEFORE the loop ---
-    const { data: allUnits, error: unitsFetchErr } = await supabaseAdmin
-      .from('m_units')
-      .select('id, code, name')
+    // --- PRE-FETCH: Load units and auth users ---
+    const { data: allUnits } = await supabaseAdmin.from('m_units').select('id, code, name')
+    const { data: { users: allAuthUsers } } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 })
 
-    if (unitsFetchErr) {
-      console.error('[IMPORT] Failed to fetch units:', unitsFetchErr)
-      return NextResponse.json({ error: 'Gagal memuat data unit: ' + unitsFetchErr.message }, { status: 500 })
-    }
-
-    const { data: { users: allAuthUsers }, error: authListError } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 })
-    if (authListError) {
-      console.error('[IMPORT] Failed to list auth users:', authListError)
-      return NextResponse.json({ error: 'Gagal memuat data auth: ' + authListError.message }, { status: 500 })
-    }
-
-    // Build lookup maps for O(1) access
-    const unitByCode = new Map<string, { id: string; code: string; name: string }>()
-    const unitByNameLower = new Map<string, { id: string; code: string; name: string }>()
-    for (const u of (allUnits || [])) {
+    // Build lookup maps
+    const unitByCode = new Map<string, any>()
+    const unitByName = new Map<string, any>()
+    allUnits?.forEach(u => {
       unitByCode.set(u.code.toLowerCase(), u)
-      unitByNameLower.set(u.name.toLowerCase(), u)
-    }
+      unitByName.set(u.name.toLowerCase(), u)
+    })
 
-    const authUserByEmail = new Map<string, { id: string }>()
-    for (const u of (allAuthUsers || [])) {
-      if (u.email) authUserByEmail.set(u.email.toLowerCase(), { id: u.id })
-    }
+    const authUserByEmail = new Map<string, any>()
+    allAuthUsers?.forEach(u => {
+      if (u.email) authUserByEmail.set(u.email.toLowerCase(), u)
+    })
+
+    const codesInFile = new Set<string>()
 
     // 3. Process records
     for (let i = 0; i < rawData.length; i++) {
       const row = rawData[i]
-      const rowNum = i + 2 // +2 because row 1 is header in Excel
+      const rowNum = i + 2
+      const nonEmpty = Object.values(row).filter(v => v !== '' && v !== null)
+      if (nonEmpty.length === 0) continue
 
-      const employeeCode = getVal(row, ['Kode Pegawai', 'Kode', 'Employee Code', 'NIP'])?.toString().trim()
-      const fullName = getVal(row, ['Nama Lengkap', 'Nama', 'Full Name', 'Name'])?.toString().trim()
-      const unitCode = getVal(row, ['Kode Unit', 'Unit', 'Unit Code', 'KodeUnit'])?.toString().trim()
+      const employeeCode = getVal(row, ['Kode Pegawai', 'Kode', 'NIP'])?.toString().trim()
+      const fullName = getVal(row, ['Nama Lengkap', 'Nama'])?.toString().trim()
+      const unitCode = getVal(row, ['Kode Unit', 'Unit'])?.toString().trim()
       const email = getVal(row, ['Email'])?.toString().trim().toLowerCase()
 
       try {
         if (!employeeCode || !fullName || !unitCode) {
-          // Skip truly empty rows silently
-          const nonEmpty = Object.values(row).filter(v => v !== '' && v !== undefined && v !== null)
-          if (nonEmpty.length <= 1) continue
-
-          results.failed++
-          results.errors.push(`Baris ${rowNum} - Data wajib tidak lengkap (Kode: ${employeeCode || '-'}, Nama: ${fullName || '-'}, Unit: ${unitCode || '-'})`)
-          continue
+          throw new Error(`Data wajib kosong (Kode: ${employeeCode || '-'}, Nama: ${fullName || '-'}, Unit: ${unitCode || '-'})`)
         }
 
-        // --- Read optional fields ---
-        const nik = getVal(row, ['NIK', 'No KTP'])?.toString().trim()
-        const position = getVal(row, ['Jabatan', 'Position'])?.toString().trim()
-        const phone = getVal(row, ['Telepon', 'Phone', 'No HP', 'WhatsApp'])?.toString().trim()
-        const taxStatus = getVal(row, ['Status Pajak', 'PTKP', 'Tax Status'])?.toString().trim() || 'TK/0'
-        const bankName = getVal(row, ['Nama Bank', 'Bank'])?.toString().trim()
-        const bankAccountNumber = getVal(row, ['Nomor Rekening', 'Rekening', 'No Rek'])?.toString().trim()
-        const bankAccountName = getVal(row, ['Nama Pemilik Rekening', 'Account Name', 'Nama Rek'])?.toString().trim()
-        const roleStr = getVal(row, ['Role', 'Peran'])?.toString().trim().toLowerCase()
-        const statusStr = getVal(row, ['Status', 'Active'])?.toString().trim().toLowerCase()
-
-        const rawEmploymentStatus = String(getVal(row, ['Status Pegawai', 'Employment Status']) || '').toUpperCase()
-        let employmentStatus: 'PNS' | 'PPPK' | 'PPPK PARUH WAKTU' | 'BLUD' = 'BLUD'
-        if (rawEmploymentStatus.includes('PNS') || rawEmploymentStatus.includes('ASN')) {
-          employmentStatus = 'PNS'
-        } else if (rawEmploymentStatus.includes('PARUH WAKTU')) {
-          employmentStatus = 'PPPK PARUH WAKTU'
-        } else if (rawEmploymentStatus.includes('PPPK')) {
-          employmentStatus = 'PPPK'
-        } else if (rawEmploymentStatus.includes('BLUD')) {
-          employmentStatus = 'BLUD'
+        if (codesInFile.has(employeeCode)) {
+          throw new Error(`Kode duplikat: ${employeeCode}`)
         }
+        codesInFile.add(employeeCode)
 
-        const rawGrade = String(getVal(row, ['Golongan', 'Grade']) || '').trim().replace(/[^0-9]/g, '')
-        const pnsGrade = employmentStatus === 'PNS' ? (rawGrade || null) : null
-        const taxTypeReq = getVal(row, ['Jenis Pajak', 'Tax Type'])?.toString().trim()
+        // Enums & Norms
+        const roleStr = getVal(row, ['Role'])?.toString().trim().toLowerCase()
+        const normalizedRole = ['superadmin', 'unit_manager', 'employee'].includes(roleStr) ? roleStr : 'employee'
 
-        // Validate role
-        const validRoles = ['superadmin', 'unit_manager', 'employee']
-        const normalizedRole = validRoles.includes(roleStr || '') ? roleStr! : 'employee'
+        // Unit match
+        const unitLc = unitCode.toLowerCase()
+        const unit = unitByCode.get(unitLc) || unitByName.get(unitLc) ||
+          [...unitByName.values()].find(u => u.name.toLowerCase().includes(unitLc))
 
-        // Validate tax status
-        const validTaxStatus = ['TK/0', 'TK/1', 'TK/2', 'TK/3', 'K/0', 'K/1', 'K/2', 'K/3']
-        const normalizedTaxStatus = validTaxStatus.includes(taxStatus) ? taxStatus : 'TK/0'
+        if (!unit) throw new Error(`Unit "${unitCode}" tidak ditemukan`)
 
-        // --- Match unit using pre-fetched data (O(1) lookup) ---
-        const unitCodeLower = unitCode.toLowerCase()
-        let unit = unitByCode.get(unitCodeLower) || unitByNameLower.get(unitCodeLower) || null
-
-        // Fuzzy fallback: check if unit name contains the search term
-        if (!unit) {
-          for (const [name, u] of unitByNameLower) {
-            if (name.includes(unitCodeLower) || unitCodeLower.includes(name)) {
-              unit = u
-              break
-            }
-          }
-        }
-
-        if (!unit) {
-          throw new Error(`Unit "${unitCode}" tidak ditemukan. Pastikan kode unit sudah ada di Master Unit.`)
-        }
-
-        // --- Check if employee already exists ---
-        const { data: existing, error: checkError } = await supabaseAdmin
-          .from('m_employees')
-          .select('id, user_id')
-          .eq('employee_code', employeeCode)
-          .maybeSingle()
-
-        if (checkError) throw checkError
-
-        // --- Auth User Sync (using pre-fetched map) ---
+        // Auth Sync
         let authUserId: string | null = null
         if (email) {
-          const existingAuthUser = authUserByEmail.get(email)
+          if (!email.includes('@')) throw new Error(`Email tidak valid: ${email}`)
 
+          const existingAuthUser = authUserByEmail.get(email)
           if (existingAuthUser) {
             authUserId = existingAuthUser.id
-            // Update metadata silently
-            await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-              user_metadata: { role: normalizedRole, full_name: fullName }
-            })
+            // ONLY update if metadata changed to save time/rate-limits
+            const meta = existingAuthUser.user_metadata || {}
+            if (meta.role !== normalizedRole || meta.full_name !== fullName) {
+              await supabaseAdmin.auth.admin.updateUserById(existingAuthUser.id, {
+                user_metadata: { ...meta, role: normalizedRole, full_name: fullName }
+              })
+            }
           } else {
-            // Create new auth user
-            const { data: newAuthUser, error: createAuthError } = await supabaseAdmin.auth.admin.createUser({
+            const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
               email,
               password: `JASPEL_${employeeCode}`,
               email_confirm: true,
               user_metadata: { role: normalizedRole, full_name: fullName }
             })
-            if (createAuthError) {
-              // If user exists error, skip auth creation but continue
-              if (createAuthError.message?.includes('already') || createAuthError.message?.includes('duplicate')) {
-                console.warn(`[IMPORT] Auth user ${email} already exists, skipping auth creation`)
-              } else {
-                throw createAuthError
-              }
-            } else {
-              authUserId = newAuthUser?.user?.id ?? null
-              // Add to cache for subsequent rows with same email
-              if (authUserId) authUserByEmail.set(email, { id: authUserId })
-            }
+            if (createError) throw createError
+            authUserId = newUser.user?.id || null
           }
         }
 
-        // --- Save Employee Data ---
-        const employeeData = {
-          employee_code: employeeCode,
-          full_name: fullName,
+        // Final Employee Data
+        const empData = {
+          employee_code: trunc(employeeCode, 50),
+          full_name: trunc(fullName, 255),
           unit_id: unit.id,
           user_id: authUserId,
-          email: email,
-          nik: nik || null,
-          position: position || null,
-          phone: phone || null,
-          tax_status: normalizedTaxStatus,
-          bank_name: bankName || null,
-          bank_account_number: bankAccountNumber || null,
-          bank_account_name: bankAccountName || null,
+          email: trunc(email, 255),
           role: normalizedRole,
-          employment_status: employmentStatus,
-          employee_status: employmentStatus,
-          tax_type: taxTypeReq || 'Final',
-          pns_grade: pnsGrade,
-          is_active: statusStr ? (statusStr === 'aktif' || statusStr === 'active' || statusStr === '1') : true,
+          tax_status: normalizeTaxStatus(getVal(row, ['Status Pajak', 'PTKP'])),
+          nik: trunc(getVal(row, ['NIK']), 100),
+          position: trunc(getVal(row, ['Jabatan']), 500),
+          phone: trunc(getVal(row, ['Telepon', 'No HP']), 100),
+          bank_name: trunc(getVal(row, ['Nama Bank']), 255),
+          bank_account_number: trunc(getVal(row, ['Nomor Rekening']), 100),
+          bank_account_name: trunc(getVal(row, ['Nama Pemilik Rekening']), 500),
+          employment_status: normalizeEmploymentStatus(getVal(row, ['Status Pegawai'])),
+          pns_grade: trunc(getVal(row, ['Golongan'])?.toString().trim()?.replace(/[^0-9]/g, ''), 100) || null,
+          tax_type: trunc(getVal(row, ['Jenis Pajak'])?.toString().trim() === 'TER' ? 'TER' : 'Final', 100),
+          is_active: true,
           updated_at: new Date().toISOString()
         }
 
-        if (existing) {
-          const { error: updateError } = await supabaseAdmin
-            .from('m_employees')
-            .update(employeeData)
-            .eq('id', existing.id)
-          if (updateError) throw updateError
-        } else {
-          const { error: insertError } = await supabaseAdmin
-            .from('m_employees')
-            .insert({ ...employeeData, created_at: new Date().toISOString() })
-          if (insertError) throw insertError
-        }
+        const { error: upsertErr } = await supabaseAdmin
+          .from('m_employees')
+          .upsert(empData, { onConflict: 'employee_code' })
 
+        if (upsertErr) throw upsertErr
         results.success++
-        console.log(`[IMPORT OK] Baris ${rowNum}: ${fullName} (${employeeCode})`)
-      } catch (error: any) {
-        console.error(`[IMPORT ERROR] Baris ${rowNum} (${employeeCode || 'N/A'}):`, error.message)
+      } catch (err: any) {
         results.failed++
-        const displayName = fullName || employeeCode || `Baris ${rowNum}`
-        results.errors.push(`${displayName}: ${error.message || 'Error tidak diketahui'}`)
+        results.failedRows.push({
+          rowNumber: rowNum,
+          code: employeeCode || '-',
+          name: fullName || '-',
+          reason: err.message || 'Unknown error',
+          data: row
+        })
       }
     }
 
-    console.log(`[IMPORT SELESAI] Berhasil: ${results.success}, Gagal: ${results.failed}`)
     return NextResponse.json(results)
   } catch (error: any) {
-    console.error('CRITICAL: Error importing pegawai:', error)
-    return NextResponse.json(
-      { error: error.message || 'Gagal memproses data import' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

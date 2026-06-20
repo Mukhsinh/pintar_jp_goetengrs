@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,7 @@ import { Plus, BookOpen } from 'lucide-react'
 import PoolTable from '@/components/pool/PoolTable'
 import PoolFormDialog from '@/components/pool/PoolFormDialog'
 import PoolDetailsDialog from '@/components/pool/PoolDetailsDialog'
+import PoolCharts from '@/components/pool/PoolCharts'
 
 interface Pool {
   id: string
@@ -31,12 +32,40 @@ export default function PoolManagementPage() {
   const [selectedPool, setSelectedPool] = useState<Pool | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isDownloadingGuide, setIsDownloadingGuide] = useState(false)
+  const [revenueData, setRevenueData] = useState<any[]>([])
+  const [userRole, setUserRole] = useState<string | null>(null)
 
   const loadPools = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     try {
       const supabase = createClient()
+
+      // Fetch user role
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        // Use middleware-consistent logic for robust role detection
+        const userMeta = user.user_metadata || {}
+        const appMeta = user.app_metadata || {}
+        const rawRole = (appMeta.role || userMeta.role || '').toString().toLowerCase()
+        const isAdmin = rawRole === 'superadmin' || rawRole === 'admin' || user.email === 'admin@goetengrs.com'
+
+        if (isAdmin) {
+          setUserRole('superadmin')
+        } else {
+          // Fallback to m_employees table for other roles
+          const { data: employeeData } = await supabase
+            .from('m_employees')
+            .select('role')
+            .eq('user_id', user.id)
+            .single()
+
+          if (employeeData) {
+            setUserRole(employeeData.role)
+          }
+        }
+      }
+
       const { data, error } = await supabase
         .from('t_pool')
         .select('*')
@@ -45,13 +74,23 @@ export default function PoolManagementPage() {
       if (error) throw error
       setPools(data || [])
 
-      // Update selected pool if it's currently being viewed/edited
-      if (data) {
-        setSelectedPool(prev => {
-          if (!prev) return null
-          const updated = data.find(p => p.id === prev.id)
-          return updated || prev
-        })
+      if (data && data.length > 0) {
+        const latestPoolId = data[0].id
+        const { data: revData } = await supabase
+          .from('t_pool_revenue')
+          .select('category, amount, patient_count')
+          .eq('pool_id', latestPoolId)
+
+        // Aggregate by category
+        const aggregated = (revData || []).reduce((acc: any, curr: any) => {
+          const cat = curr.category || 'Lainnya'
+          if (!acc[cat]) acc[cat] = { category: cat, amount: 0, patient_count: 0 }
+          acc[cat].amount += Number(curr.amount)
+          acc[cat].patient_count += Number(curr.patient_count || 0)
+          return acc
+        }, {})
+
+        setRevenueData(Object.values(aggregated))
       }
     } catch (error: any) {
       console.error('Error loading pools:', error)
@@ -140,41 +179,66 @@ export default function PoolManagementPage() {
     }
   }, [])
 
+
+  const trendData = useMemo(() => {
+    return [...pools].reverse().slice(-6).map(p => ({
+      period: p.period,
+      revenue: Number(p.revenue_total)
+    }))
+  }, [pools])
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-6 space-y-6 bg-slate-50/30 min-h-screen">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Manajemen Pool</h1>
-          <p className="text-gray-600 mt-1">Kelola pool keuangan untuk distribusi insentif</p>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Manajemen Pool</h1>
+          <p className="text-sm font-medium text-slate-500 mt-1">Kelola pool keuangan untuk distribusi insentif kinerja</p>
         </div>
         <div className="flex gap-3">
           <Button
             onClick={handleDownloadGuide}
+            variant="outline"
             disabled={isDownloadingGuide}
-            className="bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50"
+            className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-xl"
           >
             <BookOpen className="h-4 w-4 mr-2" />
-            {isDownloadingGuide ? 'Mengunduh...' : 'Unduh Petunjuk'}
+            {isDownloadingGuide ? 'Mengunduh...' : 'Unduh Panduan'}
           </Button>
-          <Button onClick={handleCreatePool}>
-            <Plus className="h-4 w-4 mr-2" />
-            Buat Pool
-          </Button>
+          {userRole === 'superadmin' && (
+            <Button
+              onClick={handleCreatePool}
+              className="bg-blue-600 hover:bg-blue-700 rounded-xl px-6 shadow-md shadow-blue-200"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Buat Periode Baru
+            </Button>
+          )}
         </div>
       </div>
 
       {error && (
-        <Card className="border-red-200 bg-red-50">
+        <Card className="border-red-200 bg-red-50 rounded-2xl overflow-hidden shadow-sm">
           <CardContent className="pt-6">
-            <p className="text-red-800">{error}</p>
+            <div className="flex items-center gap-3 text-red-800 font-medium">
+              <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              {error}
+            </div>
           </CardContent>
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Riwayat Pool</CardTitle>
-          <CardDescription>Lihat dan kelola semua pool keuangan</CardDescription>
+      {pools.length > 0 && (
+        <PoolCharts
+          revenueData={revenueData}
+          trendData={trendData}
+          selectedPeriod={pools[0].period}
+        />
+      )}
+
+      <Card className="border-slate-100 shadow-sm rounded-[2rem] overflow-hidden">
+        <CardHeader className="bg-slate-50/50 border-b border-slate-50 py-6">
+          <CardTitle className="text-xl font-bold text-slate-800">Riwayat Pool Keuangan</CardTitle>
+          <CardDescription>Daftar lengkap alokasi pendapatan dan potongan tiap periode</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -190,6 +254,7 @@ export default function PoolManagementPage() {
               pools={pools}
               onView={handleViewPool}
               onApprove={handleApprovePool}
+              userRole={userRole}
             />
           )}
         </CardContent>
@@ -206,6 +271,7 @@ export default function PoolManagementPage() {
         onOpenChange={setIsDetailsDialogOpen}
         pool={selectedPool}
         onUpdate={loadPools}
+        userRole={userRole}
       />
     </div>
   )

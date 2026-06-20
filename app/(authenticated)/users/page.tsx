@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { getUsers, type UserWithPegawai } from './actions'
-import { Plus, Search, RefreshCw, Users as UsersIcon, Filter, ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react'
+import { getUsers, exportUserListToPDF, type UserWithPegawai } from './actions'
+import { Plus, Search, RefreshCw, Users as UsersIcon, Filter, ChevronLeft, ChevronRight, FileDown, Upload } from 'lucide-react'
 import { UserTable } from '@/components/users/UserTable'
 import { UserFormDialog } from '@/components/users/UserFormDialog'
 import { cn } from '@/lib/utils'
@@ -107,8 +107,30 @@ export default function UsersPage() {
     setLoading(false)
   }, [loadUsers])
 
-  const handleDownloadReport = (format: 'excel' | 'pdf') => {
-    window.open(`/api/users/export?format=${format}`, '_blank')
+  const [isExporting, setIsExporting] = useState(false)
+
+  const handleDownloadPDF = async () => {
+    setIsExporting(true)
+    try {
+      const result = await exportUserListToPDF()
+      if (result.error) throw new Error(result.error)
+      if (result.data) {
+        // Create a link and trigger download
+        const blob = await (await fetch(`data:application/pdf;base64,${result.data}`)).blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `Daftar_Pengguna_Jaspel_${new Date().toISOString().split('T')[0]}.pdf`
+        document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+      }
+    } catch (err: any) {
+      alert(err.message || 'Gagal mengunduh PDF')
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   return (
@@ -137,6 +159,15 @@ export default function UsersPage() {
           >
             <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", loading && "animate-spin")} />
             Muat Ulang
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleDownloadPDF}
+            disabled={isExporting}
+            className="h-9 px-4 rounded-xl text-sm font-medium text-blue-600 border-blue-100 bg-blue-50/50 hover:bg-blue-600 hover:text-white transition-all flex-1 lg:flex-none border-dashed"
+          >
+            <FileDown className={cn("h-3.5 w-3.5 mr-1.5", isExporting && "animate-pulse")} />
+            {isExporting ? 'Proses...' : 'Unduh PDF'}
           </Button>
           <Button
             onClick={() => setShowCreateDialog(true)}

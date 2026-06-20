@@ -17,8 +17,7 @@
     "validate:env": "tsx scripts/validate-env.ts",
     "deploy:vercel": "tsx scripts/deploy-vercel.ts",
     "deploy:prod": "tsx scripts/deploy-vercel.ts --prod",
-    "health:check": "curl -f http://localhost:3002/api/health || exit 1",
-    "postinstall": "prisma generate || true"
+    "health:check": "curl -f http://localhost:3002/api/health || exit 1"
   },
   "dependencies": {
     "@alloc/quick-lru": "^5.2.0",

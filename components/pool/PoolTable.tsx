@@ -1,8 +1,10 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
-import { Eye, Check } from 'lucide-react'
+import { Eye, Check, Printer, Loader2 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils/format'
+import { exportPoolReportToPDF } from '@/app/(authenticated)/pool/actions'
+import { useState } from 'react'
 
 interface Pool {
   id: string
@@ -22,9 +24,32 @@ interface PoolTableProps {
   pools: Pool[]
   onView: (pool: Pool) => void
   onApprove: (poolId: string) => void
+  userRole?: string | null
 }
 
-export default function PoolTable({ pools, onView, onApprove }: PoolTableProps) {
+export default function PoolTable({ pools, onView, onApprove, userRole }: PoolTableProps) {
+  const [printingId, setPrintingId] = useState<string | null>(null)
+
+  async function handlePrint(pool: Pool) {
+    setPrintingId(pool.id)
+    try {
+      const result = await exportPoolReportToPDF(pool.id)
+      if (result.success && result.data) {
+        const linkSource = `data:application/pdf;base64,${result.data}`
+        const downloadLink = document.createElement('a')
+        downloadLink.href = linkSource
+        downloadLink.download = result.filename || `Pool_${pool.period}.pdf`
+        downloadLink.click()
+      } else {
+        alert('Gagal mengunduh PDF: ' + result.error)
+      }
+    } catch (error) {
+      console.error('Print error:', error)
+      alert('Terjadi kesalahan saat mencetak')
+    } finally {
+      setPrintingId(null)
+    }
+  }
 
   function getStatusBadge(status: string) {
     const styles = {
@@ -32,7 +57,7 @@ export default function PoolTable({ pools, onView, onApprove }: PoolTableProps) 
       approved: 'bg-green-100 text-green-800',
       distributed: 'bg-blue-100 text-blue-800'
     }
-    
+
     const labels = {
       draft: 'Draft',
       approved: 'Disetujui',
@@ -86,17 +111,32 @@ export default function PoolTable({ pools, onView, onApprove }: PoolTableProps) 
                     size="sm"
                     variant="outline"
                     onClick={() => onView(pool)}
+                    className="rounded-lg h-8 text-[11px] font-bold uppercase tracking-tight"
                   >
-                    <Eye className="h-4 w-4 mr-1" />
-                    Lihat
+                    <Eye className="h-3.5 w-3.5 mr-1.5" />
+                    Detail
                   </Button>
-                  {pool.status === 'draft' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handlePrint(pool)}
+                    disabled={printingId === pool.id}
+                    className="rounded-lg h-8 text-[11px] font-bold uppercase tracking-tight border-blue-200 text-blue-600 hover:bg-blue-50"
+                  >
+                    {printingId === pool.id ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Printer className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    Cetak
+                  </Button>
+                  {pool.status === 'draft' && userRole === 'superadmin' && (
                     <Button
                       size="sm"
                       onClick={() => onApprove(pool.id)}
-                      className="bg-green-600 hover:bg-green-700"
+                      className="bg-green-600 hover:bg-green-700 rounded-lg h-8 text-[11px] font-bold uppercase tracking-tight shadow-sm shadow-green-100"
                     >
-                      <Check className="h-4 w-4 mr-1" />
+                      <Check className="h-3.5 w-3.5 mr-1.5" />
                       Setujui
                     </Button>
                   )}

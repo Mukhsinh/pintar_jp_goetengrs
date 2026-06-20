@@ -14,6 +14,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Plus, Trash2, Pencil } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils/format'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Label } from '@/components/ui/label'
 
 interface Pool {
   id: string
@@ -31,6 +39,8 @@ interface RevenueItem {
   pool_id: string
   description: string
   amount: number
+  category: 'Rawat Jalan' | 'Rawat Inap' | 'AMHP' | 'Ambulance' | null
+  patient_count: number | null
 }
 
 interface DeductionItem {
@@ -45,20 +55,27 @@ interface PoolDetailsDialogProps {
   onOpenChange: (open: boolean) => void
   pool: Pool | null
   onUpdate: () => void
+  userRole?: string | null
 }
 
 export default function PoolDetailsDialog({
   open,
   onOpenChange,
   pool,
-  onUpdate
+  onUpdate,
+  userRole
 }: PoolDetailsDialogProps) {
   const [revenueItems, setRevenueItems] = useState<RevenueItem[]>([])
   const [deductionItems, setDeductionItems] = useState<DeductionItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   // Revenue form
-  const [revenueForm, setRevenueForm] = useState({ description: '', amount: '' })
+  const [revenueForm, setRevenueForm] = useState({
+    description: '',
+    amount: '',
+    category: '' as any,
+    patient_count: ''
+  })
   const [editingRevenue, setEditingRevenue] = useState<string | null>(null)
 
   // Deduction form
@@ -106,9 +123,9 @@ export default function PoolDetailsDialog({
   }
 
   async function handleAddRevenue() {
-    if (!pool || !revenueForm.description || !revenueForm.amount) return
-    if (pool.status !== 'draft') {
-      alert('Tidak dapat mengubah pool yang sudah disetujui')
+    if (!pool || !revenueForm.amount || (!revenueForm.description && !revenueForm.category)) return
+    if (pool.status !== 'draft' || userRole !== 'superadmin') {
+      alert('Anda tidak memiliki akses untuk mengubah data ini')
       return
     }
 
@@ -121,7 +138,9 @@ export default function PoolDetailsDialog({
           .from('t_pool_revenue')
           .update({
             description: revenueForm.description,
-            amount: parseFloat(revenueForm.amount)
+            amount: parseFloat(revenueForm.amount),
+            category: revenueForm.category || null,
+            patient_count: revenueForm.patient_count ? parseInt(revenueForm.patient_count) : null
           })
           .eq('id', editingRevenue)
 
@@ -134,14 +153,16 @@ export default function PoolDetailsDialog({
           .insert({
             pool_id: pool.id,
             description: revenueForm.description,
-            amount: parseFloat(revenueForm.amount)
+            amount: parseFloat(revenueForm.amount),
+            category: revenueForm.category || null,
+            patient_count: revenueForm.patient_count ? parseInt(revenueForm.patient_count) : null
           })
 
         if (error) throw error
       }
 
       await updatePoolTotals()
-      setRevenueForm({ description: '', amount: '' })
+      setRevenueForm({ description: '', amount: '', category: '', patient_count: '' })
       await loadPoolItems()
       onUpdate()
     } catch (error: any) {
@@ -154,18 +175,20 @@ export default function PoolDetailsDialog({
     setEditingRevenue(item.id)
     setRevenueForm({
       description: item.description,
-      amount: item.amount.toString()
+      amount: item.amount.toString(),
+      category: item.category || '',
+      patient_count: item.patient_count?.toString() || ''
     })
   }
 
   function handleCancelEditRevenue() {
     setEditingRevenue(null)
-    setRevenueForm({ description: '', amount: '' })
+    setRevenueForm({ description: '', amount: '', category: '', patient_count: '' })
   }
 
   async function handleDeleteRevenue(id: string) {
-    if (!pool || pool.status !== 'draft') {
-      alert('Tidak dapat mengubah pool yang sudah disetujui')
+    if (!pool || pool.status !== 'draft' || userRole !== 'superadmin') {
+      alert('Anda tidak memiliki akses untuk mengubah data ini')
       return
     }
 
@@ -191,8 +214,8 @@ export default function PoolDetailsDialog({
 
   async function handleAddDeduction() {
     if (!pool || !deductionForm.description || !deductionForm.amount) return
-    if (pool.status !== 'draft') {
-      alert('Tidak dapat mengubah pool yang sudah disetujui')
+    if (pool.status !== 'draft' || userRole !== 'superadmin') {
+      alert('Anda tidak memiliki akses untuk mengubah data ini')
       return
     }
 
@@ -248,8 +271,8 @@ export default function PoolDetailsDialog({
   }
 
   async function handleDeleteDeduction(id: string) {
-    if (!pool || pool.status !== 'draft') {
-      alert('Tidak dapat mengubah pool yang sudah disetujui')
+    if (!pool || pool.status !== 'draft' || userRole !== 'superadmin') {
+      alert('Anda tidak memiliki akses untuk mengubah data ini')
       return
     }
 
@@ -341,7 +364,7 @@ export default function PoolDetailsDialog({
   }
 
   async function handleFinalSave() {
-    if (isDraft) {
+    if (isDraft && pool) {
       const percentage = parseFloat(allocationPercentage)
       if (!isNaN(percentage) && percentage !== pool.global_allocation_percentage) {
         await handleUpdatePercentage()
@@ -353,6 +376,7 @@ export default function PoolDetailsDialog({
   if (!pool) return null
 
   const isDraft = pool.status === 'draft'
+  const canEdit = isDraft && userRole === 'superadmin'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -391,29 +415,74 @@ export default function PoolDetailsDialog({
               <h3 className="text-lg font-semibold">Item Pendapatan</h3>
             </div>
 
-            {isDraft && (
-              <div className="flex gap-2 mb-3">
-                <Input
-                  placeholder="Deskripsi"
-                  value={revenueForm.description}
-                  onChange={(e) => setRevenueForm({ ...revenueForm, description: e.target.value })}
-                />
-                <Input
-                  type="number"
-                  placeholder="Jumlah"
-                  value={revenueForm.amount}
-                  onChange={(e) => setRevenueForm({ ...revenueForm, amount: e.target.value })}
-                  className="w-40"
-                />
-                <Button onClick={handleAddRevenue} size="sm">
-                  <Plus className="h-4 w-4 mr-1" />
-                  {editingRevenue ? 'Simpan' : 'Tambah'}
-                </Button>
-                {editingRevenue && (
-                  <Button onClick={handleCancelEditRevenue} size="sm" variant="outline">
-                    Batal
+            {canEdit && (
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6">
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase text-slate-500">Kategori Pendapatan</Label>
+                    <Select
+                      value={revenueForm.category}
+                      onValueChange={(val) => setRevenueForm({ ...revenueForm, category: val as any })}
+                    >
+                      <SelectTrigger className="bg-white">
+                        <SelectValue placeholder="Pilih Kategori" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Rawat Jalan">Rawat Jalan</SelectItem>
+                        <SelectItem value="Rawat Inap">Rawat Inap</SelectItem>
+                        <SelectItem value="AMHP">AMHP</SelectItem>
+                        <SelectItem value="Ambulance">Ambulance</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase text-slate-500">Deskripsi (Opsional)</Label>
+                    <Input
+                      placeholder="Masukkan catatan atau keterangan"
+                      value={revenueForm.description}
+                      onChange={(e) => setRevenueForm({ ...revenueForm, description: e.target.value })}
+                      className="bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase text-slate-500">Jumlah Pendapatan (Wajib)</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium">Rp</span>
+                      <Input
+                        type="number"
+                        placeholder="0"
+                        value={revenueForm.amount}
+                        onChange={(e) => setRevenueForm({ ...revenueForm, amount: e.target.value })}
+                        className="pl-10 bg-white"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase text-slate-500">Jumlah Pasien (Opsional)</Label>
+                    <Input
+                      type="number"
+                      placeholder="0"
+                      value={revenueForm.patient_count}
+                      onChange={(e) => setRevenueForm({ ...revenueForm, patient_count: e.target.value })}
+                      className="bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  {editingRevenue && (
+                    <Button onClick={handleCancelEditRevenue} variant="outline" size="sm" className="rounded-lg">
+                      Batal
+                    </Button>
+                  )}
+                  <Button onClick={handleAddRevenue} size="sm" className="bg-blue-600 hover:bg-blue-700 rounded-lg px-6">
+                    <Plus className="h-4 w-4 mr-2" />
+                    {editingRevenue ? 'Update Item' : 'Tambah Item'}
                   </Button>
-                )}
+                </div>
               </div>
             )}
 
@@ -424,11 +493,21 @@ export default function PoolDetailsDialog({
                 revenueItems.map(item => (
                   <div key={item.id} className="flex justify-between items-center p-3 bg-white border rounded">
                     <div className="flex-1">
-                      <p className="font-medium">{item.description}</p>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 rounded">
+                          {item.category || 'Lainnya'}
+                        </span>
+                        {item.patient_count && (
+                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded">
+                            {item.patient_count} Pasien
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-medium text-slate-800">{item.description || item.category}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <p className="font-semibold">{formatCurrency(item.amount)}</p>
-                      {isDraft && (
+                      <p className="font-bold text-slate-900">{formatCurrency(item.amount)}</p>
+                      {canEdit && (
                         <>
                           <Button
                             size="sm"
@@ -459,7 +538,7 @@ export default function PoolDetailsDialog({
               <h3 className="text-lg font-semibold">Item Potongan</h3>
             </div>
 
-            {isDraft && (
+            {canEdit && (
               <div className="flex gap-2 mb-3">
                 <Input
                   placeholder="Deskripsi"
@@ -496,7 +575,7 @@ export default function PoolDetailsDialog({
                     </div>
                     <div className="flex items-center gap-3">
                       <p className="font-semibold">{formatCurrency(item.amount)}</p>
-                      {isDraft && (
+                      {canEdit && (
                         <>
                           <Button
                             size="sm"
@@ -525,7 +604,7 @@ export default function PoolDetailsDialog({
         <DialogFooter className="border-t pt-4 px-6 pb-6">
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center gap-3">
-              {isDraft && (
+              {canEdit && (
                 <>
                   <span className="text-xs font-semibold text-gray-600">Konfigurasi Alokasi:</span>
                   <div className="flex items-center bg-white border border-gray-300 rounded overflow-hidden focus-within:ring-1 focus-within:ring-blue-500">
@@ -550,7 +629,7 @@ export default function PoolDetailsDialog({
               onClick={handleFinalSave}
               className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs px-8"
             >
-              Simpan
+              {canEdit ? 'Simpan' : 'Tutup'}
             </Button>
           </div>
         </DialogFooter>

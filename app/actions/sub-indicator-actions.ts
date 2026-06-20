@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
 export async function createSubIndicator(formData: {
@@ -125,6 +125,7 @@ export async function updateSubIndicator(id: string, formData: {
   service_types?: string[]
 }) {
   const supabase = await createClient()
+  const adminSupabase = await createAdminClient()
 
   try {
     // Validate user has permission
@@ -154,7 +155,7 @@ export async function updateSubIndicator(id: string, formData: {
     }
 
     // Get current sub indicator
-    const { data: currentSub, error: currentError } = await supabase
+    const { data: currentSub, error: currentError } = await adminSupabase
       .from('m_kpi_sub_indicators')
       .select('indicator_id, weight_percentage')
       .eq('id', id)
@@ -165,7 +166,7 @@ export async function updateSubIndicator(id: string, formData: {
     }
 
     // Validate weight percentage doesn't exceed 100%
-    const { data: existingSubs } = await supabase
+    const { data: existingSubs } = await adminSupabase
       .from('m_kpi_sub_indicators')
       .select('weight_percentage')
       .eq('indicator_id', currentSub.indicator_id)
@@ -179,7 +180,7 @@ export async function updateSubIndicator(id: string, formData: {
       throw new Error(`Total bobot akan menjadi ${newTotalWeight.toFixed(2)}% (maksimal 100%)`)
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await adminSupabase
       .from('m_kpi_sub_indicators')
       .update({
         name: formData.name,

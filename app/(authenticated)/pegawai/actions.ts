@@ -10,7 +10,8 @@ import type { Pegawai, CreatePegawaiData, UpdatePegawaiData } from '@/lib/types/
 export async function getPegawaiWithUnits(
   page: number = 1,
   pageSize: number = 50,
-  searchTerm: string = ''
+  searchTerm: string = '',
+  unitId?: string
 ): Promise<{ data: Pegawai[]; count: number; error?: string }> {
   try {
     const supabase = await createClient()
@@ -55,6 +56,11 @@ export async function getPegawaiWithUnits(
     // Apply search filter
     if (searchTerm) {
       query = query.or(`full_name.ilike.%${searchTerm}%,employee_code.ilike.%${searchTerm}%,position.ilike.%${searchTerm}%,employment_status.ilike.%${searchTerm}%`)
+    }
+
+    // Apply unit filter
+    if (unitId && unitId !== 'all') {
+      query = query.eq('unit_id', unitId)
     }
 
     // Apply pagination
@@ -284,5 +290,78 @@ export async function getUnitsForDropdown(): Promise<{ data: Array<{ id: string;
   } catch (err: any) {
     console.error('getUnitsForDropdown error:', err)
     return { data: [], error: err.message || 'Terjadi kesalahan' }
+  }
+}
+/**
+ * Server action to get aggregate stats for pegawai dashboard
+ */
+export async function getPegawaiStats(unitId?: string): Promise<{
+  total: number;
+  byGrade: Array<{ name: string; value: number }>;
+  byStatus: Array<{ name: string; value: number }>;
+  byUnit: Array<{ name: string; value: number }>;
+  error?: string;
+}> {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { total: 0, byGrade: [], byStatus: [], byUnit: [], error: 'Unauthorized' }
+
+    const adminSupabase = await createAdminClient()
+
+    // Fetch all active employees (excluding superadmin)
+    let query = adminSupabase
+      .from('m_employees')
+      .select('pns_grade, employment_status, unit_id, m_units(name)')
+      .eq('is_active', true)
+      .neq('role', 'superadmin')
+
+    // Apply unit filter
+    if (unitId && unitId !== 'all') {
+      query = query.eq('unit_id', unitId)
+    }
+
+    const { data, error } = await query
+
+    if (error) throw error
+
+    const total = data.length
+    const gradeMap = new Map<string, number>()
+    const statusMap = new Map<string, number>()
+    const unitMap = new Map<string, number>()
+
+    data.forEach(p => {
+      // Grade stats
+      const grade = p.pns_grade || 'Non-PNS'
+      gradeMap.set(grade, (gradeMap.get(grade) || 0) + 1)
+
+      // Status stats
+      const status = p.employment_status || 'Lainnya'
+      statusMap.set(status, (statusMap.get(status) || 0) + 1)
+
+      // Unit stats
+      const unitData = p.m_units
+      const unitName = Array.isArray(unitData)
+        ? unitData[0]?.name
+        : (unitData as any)?.name || 'Tanpa Unit'
+      unitMap.set(unitName, (unitMap.get(unitName) || 0) + 1)
+    })
+
+    const byGrade = Array.from(gradeMap.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+
+    const byStatus = Array.from(statusMap.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+
+    const byUnit = Array.from(unitMap.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+
+    return { total, byGrade, byStatus, byUnit }
+  } catch (err: any) {
+    console.error('getPegawaiStats error:', err)
+    return { total: 0, byGrade: [], byStatus: [], byUnit: [], error: err.message }
   }
 }

@@ -2,6 +2,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { getCompanyInfoServer, getSettingServer } from '@/lib/services/settings.server.service'
 import { createClient } from '@/lib/supabase/server'
+import { formatCurrency } from '@/lib/utils/format'
 
 interface IncentiveSlipData {
   period: string
@@ -602,9 +603,82 @@ export async function exportToPDF(options: ReportExportOptions): Promise<Uint8Ar
     return await generateIncentiveSlipPDF(slips)
   } else if (options.reportType === 'dashboard-summary') {
     return await generateDashboardReportPDF(options.data, options.period)
+  } else if (options.reportType === 'user-list') {
+    return await generateUserListPDF(options.data)
   } else {
     return await generateSummaryReportPDF(options.data, options.period, options.reportType)
   }
+}
+
+/**
+ * Generate User List PDF
+ */
+export async function generateUserListPDF(users: any[]): Promise<Uint8Array> {
+  const doc = new jsPDF()
+  const companyInfo = await getCompanyInfoServer()
+  const footerSetting = await getSettingServer('footer')
+  const footerText = footerSetting?.data?.text || 'Laporan dihasilkan secara otomatis oleh JASPEL System'
+
+  await addKopSurat(doc, companyInfo)
+
+  const centerX = doc.internal.pageSize.width / 2
+
+  doc.setFontSize(14)
+  doc.setFont('helvetica', 'bold')
+  doc.text('DAFTAR PENGGUNA SISTEM JASPEL', centerX, 42, { align: 'center' })
+
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  const dateStr = new Date().toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+  doc.text(`Dicetak pada: ${dateStr}`, 15, 50)
+
+  const head = [['No', 'Username', 'Nama Lengkap', 'Unit Kerja', 'Kode Unit', 'Role', 'Status']]
+  const body = users.map((u, i) => [
+    i + 1,
+    u.username || '-',
+    u.display_name || u.full_name || '-',
+    u.unit_name || '-',
+    u.unit_code || '-',
+    u.role_name || u.role || '-',
+    u.is_active ? 'Aktif' : 'Nonaktif'
+  ])
+
+  autoTable(doc, {
+    startY: 55,
+    head,
+    body,
+    theme: 'grid',
+    headStyles: { fillColor: [44, 62, 80], textColor: 255, fontStyle: 'bold' },
+    styles: { fontSize: 8, cellPadding: 3 },
+    columnStyles: {
+      0: { cellWidth: 10 },
+      1: { cellWidth: 25 },
+      2: { cellWidth: 40 },
+      3: { cellWidth: 40 },
+      4: { cellWidth: 20 },
+      5: { cellWidth: 25 },
+      6: { cellWidth: 20, halign: 'center' }
+    }
+  })
+
+  // Add footer to every page
+  const pageCount = (doc as any).internal.getNumberOfPages()
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i)
+    const pageHeight = doc.internal.pageSize.height
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'italic')
+    doc.text(footerText, centerX, pageHeight - 10, { align: 'center' })
+    doc.text(`Halaman ${i} dari ${pageCount}`, doc.internal.pageSize.width - 25, pageHeight - 10)
+  }
+
+  return new Uint8Array(doc.output('arraybuffer'))
 }
 
 /**
@@ -1001,6 +1075,124 @@ export async function generateDashboardReportPDF(data: any, period: string): Pro
     doc.setFont('helvetica', 'italic')
     doc.text(footerText, centerX, doc.internal.pageSize.height - 10, { align: 'center' })
     doc.text(`Halaman ${i} dari ${totalPages}`, doc.internal.pageSize.width - 30, doc.internal.pageSize.height - 10)
+  }
+
+  return new Uint8Array(doc.output('arraybuffer'))
+}
+
+/**
+ * Generate Pool Overview PDF (Revenue & Deduction Report)
+ */
+export async function generatePoolOverviewPDF(data: {
+  pool: any,
+  revenueItems: any[],
+  deductionItems: any[]
+}): Promise<Uint8Array> {
+  const doc = new jsPDF()
+  const companyInfo = await getCompanyInfoServer()
+  const footerSetting = await getSettingServer('footer')
+  const footerText = footerSetting?.data?.text || 'Laporan dihasilkan secara otomatis oleh JASPEL System'
+
+  await addKopSurat(doc, companyInfo)
+
+  const centerX = doc.internal.pageSize.width / 2
+
+  doc.setFontSize(14)
+  doc.setFont('helvetica', 'bold')
+  doc.text('LAPORAN POOL KEUANGAN & PENDAPATAN', centerX, 42, { align: 'center' })
+
+  doc.setFontSize(11)
+  doc.text(`Periode: ${data.pool.period}`, centerX, 48, { align: 'center' })
+
+  // Summary Table
+  autoTable(doc, {
+    startY: 55,
+    head: [['Keterangan', 'Nilai (Rp)']],
+    body: [
+      ['Total Pendapatan kotor', formatCurrency(data.pool.revenue_total)],
+      ['Total Potongan / Beban', formatCurrency(data.pool.deduction_total)],
+      ['Pool Bersih (Net Pool)', formatCurrency(data.pool.net_pool || 0)],
+      [`Alokasi Jasa Pelayanan (${data.pool.global_allocation_percentage}%)`, formatCurrency(data.pool.allocated_amount || 0)],
+    ],
+    theme: 'grid',
+    headStyles: { fillColor: [52, 152, 219], textColor: 255 },
+    styles: { fontSize: 10, cellPadding: 3 },
+    columnStyles: {
+      1: { halign: 'right', fontStyle: 'bold' }
+    }
+  })
+
+  let currentY = (doc as any).lastAutoTable.finalY + 10
+
+  // Revenue Breakdown
+  doc.setFontSize(12)
+  doc.setFont('helvetica', 'bold')
+  doc.text('1. RINCIAN PENDAPATAN', 15, currentY)
+
+  autoTable(doc, {
+    startY: currentY + 5,
+    head: [['No', 'Kategori', 'Deskripsi', 'Pasien', 'Jumlah (Rp)']],
+    body: data.revenueItems.map((item, i) => [
+      i + 1,
+      item.category || 'Lainnya',
+      item.description || '-',
+      item.patient_count || 0,
+      formatCurrency(item.amount)
+    ]),
+    theme: 'grid',
+    headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+    styles: { fontSize: 9, cellPadding: 2.5 },
+    columnStyles: {
+      0: { cellWidth: 10 },
+      3: { cellWidth: 20, halign: 'center' },
+      4: { cellWidth: 35, halign: 'right', fontStyle: 'bold' }
+    }
+  })
+
+  currentY = (doc as any).lastAutoTable.finalY + 10
+  if (currentY > 230) { doc.addPage(); await addKopSurat(doc, companyInfo); currentY = 45 }
+
+  // Deduction Breakdown
+  doc.setFontSize(12)
+  doc.setFont('helvetica', 'bold')
+  doc.text('2. RINCIAN POTONGAN', 15, currentY)
+
+  autoTable(doc, {
+    startY: currentY + 5,
+    head: [['No', 'Deskripsi', 'Jumlah (Rp)']],
+    body: data.deductionItems.map((item, i) => [
+      i + 1,
+      item.description,
+      formatCurrency(item.amount)
+    ]),
+    theme: 'grid',
+    headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+    styles: { fontSize: 9, cellPadding: 2.5 },
+    columnStyles: {
+      0: { cellWidth: 10 },
+      2: { cellWidth: 35, halign: 'right', fontStyle: 'bold' }
+    }
+  })
+
+  // Footer / Signature placeholders
+  currentY = (doc as any).lastAutoTable.finalY + 20
+  if (currentY > 230) { doc.addPage(); await addKopSurat(doc, companyInfo); currentY = 45 }
+
+  const today = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.text(`Purbalingga, ${today}`, doc.internal.pageSize.width - 60, currentY)
+  doc.text('Manajer Keuangan', doc.internal.pageSize.width - 60, currentY + 6)
+  doc.text('( ____________________ )', doc.internal.pageSize.width - 60, currentY + 30)
+
+  // Add footer to every page
+  const pageCount = (doc as any).internal.getNumberOfPages()
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i)
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'italic')
+    doc.text(footerText, centerX, doc.internal.pageSize.height - 10, { align: 'center' })
+    doc.text(`Halaman ${i} dari ${pageCount}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 10)
   }
 
   return new Uint8Array(doc.output('arraybuffer'))

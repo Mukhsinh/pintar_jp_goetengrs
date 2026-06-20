@@ -174,8 +174,9 @@ async function generatePDFReport(unit: any, categories: any[], appSettings: any)
         { content: ind.code, styles: { fontStyle: 'bold' } },
         { content: ind.name, styles: { fontStyle: 'bold' } },
         { content: `${ind.weight_percentage}%`, styles: { fontStyle: 'bold' } },
-        { content: ind.target_value, styles: { fontStyle: 'bold' } },
-        { content: ind.measurement_unit || '-', styles: { fontStyle: 'bold' } }
+        { content: ind.target_value || 0, styles: { fontStyle: 'bold' } },
+        { content: ind.measurement_unit || '-', styles: { fontStyle: 'bold' } },
+        { content: ind.base_index_value && ind.base_index_value > 0 ? (ind.base_index_value > 1 ? new Intl.NumberFormat('id-ID').format(ind.base_index_value) : ind.base_index_value.toString()) : '-', styles: { fontStyle: 'bold' } }
       ])
 
       // Sub Indicators Rows
@@ -186,20 +187,22 @@ async function generatePDFReport(unit: any, categories: any[], appSettings: any)
           `  ${sub.code}`,
           `  ${sub.name}`,
           `${sub.weight_percentage}%`,
-          sub.target_value,
-          sub.measurement_unit || '-'
+          sub.target_value || 0,
+          sub.measurement_unit || '-',
+          sub.base_index_value && sub.base_index_value > 0 ? (sub.base_index_value > 1 ? new Intl.NumberFormat('id-ID').format(sub.base_index_value) : sub.base_index_value.toString()) : '-'
         ])
       })
     })
 
     autoTable(doc, {
       startY: currentY,
-      head: [['Kode', 'Indikator / Sub-Indikator', 'Bobot', 'Target', 'Satuan']],
+      head: [['Kode', 'Indikator / Sub-Indikator', 'Bobot', 'Target', 'Satuan', 'Tarif Dasar']],
       body: tableBody,
       foot: [[
         '',
         { content: 'SUBTOTAL BOBOT INDIKATOR', styles: { halign: 'right', fontStyle: 'bold' } },
         { content: `${totalWeightInCategory}%`, styles: { fontStyle: 'bold' } },
+        '',
         '',
         ''
       ]],
@@ -339,8 +342,9 @@ function generateExcelReport(unit: any, categories: any[], appSettings: any) {
         indicator.code,
         indicator.name,
         `Bobot: ${indicator.weight_percentage}%`,
-        `Target: ${indicator.target_value}`,
-        `Satuan: ${indicator.measurement_unit || '-'}`
+        `Target: ${indicator.target_value || 0}`,
+        `Satuan: ${indicator.measurement_unit || '-'}`,
+        `Tarif Dasar: ${indicator.base_index_value || '-'}`
       ])
 
       if (indicator.description) {
@@ -351,7 +355,7 @@ function generateExcelReport(unit: any, categories: any[], appSettings: any) {
       const subIndicators = indicator.m_kpi_sub_indicators || []
       if (subIndicators.length > 0) {
         categoryData.push([])
-        categoryData.push(['SUB INDIKATOR:', 'Kode', 'Nama', 'Bobot (%)', 'Target', 'Satuan', 'Kriteria Penilaian'])
+        categoryData.push(['SUB INDIKATOR:', 'Kode', 'Nama', 'Bobot (%)', 'Target', 'Satuan', 'Tarif Dasar', 'Kriteria Penilaian'])
 
         let totalSubWeight = 0
         subIndicators.forEach((sub: any) => {
@@ -370,8 +374,9 @@ function generateExcelReport(unit: any, categories: any[], appSettings: any) {
             sub.code,
             sub.name,
             sub.weight_percentage,
-            sub.target_value,
+            sub.target_value || 0,
             sub.measurement_unit || '-',
+            sub.base_index_value || '-',
             criteriaText
           ])
         })

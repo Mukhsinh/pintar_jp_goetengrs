@@ -1,4 +1,6 @@
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { Role } from './rbac.service'
+import { SupabaseClient } from '@supabase/supabase-js'
 
 export interface DashboardStats {
   totalEmployees: number
@@ -18,86 +20,95 @@ export interface TopPerformer {
   unit: string
   score: number
   rank: number
+  avatar?: string
 }
 
 export interface UnitPerformance {
   id: string
   name: string
-  employeeCount: number
   avgScore: number
-  trend: 'up' | 'down' | 'stable'
-  trendValue: number
-  status: 'excellent' | 'good' | 'average' | 'poor'
+  completionRate: number
+  employeeCount: number
 }
 
-export interface PerformanceData {
-  month: string
-  p1: number
-  p2: number
-  p3: number
-  total: number
+export interface PerformanceTrend {
+  period: string
+  score: number
 }
 
-export interface Activity {
-  id: string
-  type: 'success' | 'warning' | 'info' | 'error'
-  title: string
-  description: string
-  timestamp: string
+export interface KPIDistribution {
+  name: string
+  value: number
+  color: string
 }
 
 export class DashboardService {
-  private static async getCurrentPeriod(supabase: any): Promise<string> {
-    const { data } = await supabase
-      .from('t_kpi_assessments')
-      .select('period')
-      .order('period', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    return data?.period || new Date().toISOString().slice(0, 7)
+  /**
+   * Helper to get resolved periods (current and previous)
+   */
+  private static async getResolvedPeriods(supabase: SupabaseClient, period?: string, year?: string): Promise<string[]> {
+    if (period) {
+      return [period];
+    }
+    const current = new Date();
+    const currentPeriod = `${year || current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
+    return [currentPeriod];
   }
 
-  private static async getResolvedPeriods(supabase: any, period?: string, year?: string): Promise<string[]> {
-    if (!period || period === 'month') {
-      const latest = await this.getCurrentPeriod(supabase);
-      return [latest];
-    }
+  /**
+   * Shared helper to calculate performance score using the standard formula
+   * Standard Formula: Sum of ((Sum of Ind_Realisasi * Ind_Weight/100) / (Sum of Ind_Target * Ind_Weight/100)) * Cat_Weight
+   */
+  private static calculateScoreFromGroupedData(cats: { [key: string]: any[] }): number {
+    let totalScore = 0;
+    const catNames = ['P1', 'P2', 'P3'];
 
-    const targetYear = year || new Date().getFullYear().toString();
+    for (const catName of catNames) {
+      const catAssessments = cats[catName];
+      if (!catAssessments || catAssessments.length === 0) continue;
 
-    if (period.startsWith('M-')) {
-      const month = period.split('-')[1];
-      return [`${targetYear}-${month}`];
-    }
+      const firstAss = catAssessments[0];
+      const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any;
+      const categoryObj = indicator?.m_kpi_categories as any;
+      const categoryWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0;
 
-    if (period.startsWith('Q-')) {
-      const q = parseInt(period.split('-')[1]);
-      const months = [];
-      for (let i = (q - 1) * 3 + 1; i <= q * 3; i++) {
-        months.push(`${targetYear}-${String(i).padStart(2, '0')}`);
+      let totalRealisasi = 0;
+      let totalTarget = 0;
+
+      for (const a of catAssessments) {
+        const indWeight = parseFloat(a.weight_percentage) || 0;
+        totalRealisasi += (parseFloat(a.realization_value) || 0) * (indWeight / 100);
+        totalTarget += (parseFloat(a.target_value) || 100) * (indWeight / 100);
       }
-      return months;
-    }
 
-    if (period.startsWith('S-')) {
-      const s = parseInt(period.split('-')[1]);
-      const months = [];
-      for (let i = (s - 1) * 6 + 1; i <= s * 6; i++) {
-        months.push(`${targetYear}-${String(i).padStart(2, '0')}`);
+      if (totalTarget > 0) {
+        totalScore += (totalRealisasi / totalTarget) * categoryWeight;
       }
-      return months;
     }
+    return totalScore;
+  }
 
-    if (period === 'full-year') {
-      const months = [];
-      for (let i = 1; i <= 12; i++) {
-        months.push(`${targetYear}-${String(i).padStart(2, '0')}`);
+  /**
+   * Shared helper to group assessments by employee ID
+   */
+  private static groupAssessmentsByEmployee(assessments: any[]): Map<string, { [key: string]: any[] }> {
+    const empDataMap = new Map<string, { [key: string]: any[] }>();
+    for (const a of assessments) {
+      const empId = a.employee_id;
+      if (!empDataMap.has(empId)) {
+        empDataMap.set(empId, { P1: [], P2: [], P3: [] });
       }
-      return months;
-    }
 
-    return [await this.getCurrentPeriod(supabase)];
+      const indicator = (Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators) as any;
+      const categoryObj = indicator?.m_kpi_categories;
+      const catName = (Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category) as string;
+
+      const group = empDataMap.get(empId)!;
+      if (catName && group[catName]) {
+        group[catName].push(a);
+      }
+    }
+    return empDataMap;
   }
 
   /**
@@ -109,23 +120,7 @@ export class DashboardService {
     try {
       const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
 
-      // Get active non-admin employee IDs first to use as a filter
-      const { data: activeEmps } = await supabase
-        .from('m_employees')
-        .select('id')
-        .eq('is_active', true)
-        .neq('role', 'superadmin')
-
-      const activeEmpIds = activeEmps?.map(e => e.id) || []
-      const totalActiveEmployees = activeEmpIds.length
-
-      // Direct count of units excluding superadmin
-      const { count: totalUnits } = await supabase
-        .from('m_units')
-        .select('id', { count: 'exact', head: true })
-        .eq('is_active', true)
-        .neq('code', 'superadmin')
-
+      // Use inner join to filter active non-admin employees directly in the database
       let assQuery = supabase
         .from('t_kpi_assessments')
         .select(`
@@ -133,6 +128,7 @@ export class DashboardService {
           weight_percentage,
           realization_value,
           target_value,
+          employee:m_employees!t_kpi_assessments_employee_id_fkey!inner(id, is_active, role, unit_id),
           m_kpi_indicators (
             m_kpi_categories (
               category,
@@ -141,129 +137,80 @@ export class DashboardService {
           )
         `)
         .in('period', resolvedPeriods)
-        .in('employee_id', activeEmpIds) // Filter only active non-admin employees
+        .eq('employee.is_active', true)
+        .neq('employee.role', 'superadmin')
 
-      let filteredActiveEmpIds = activeEmpIds
       if (unitId && unitId !== 'all') {
-        const { data: unitEmps } = await supabase
-          .from('m_employees')
-          .select('id')
-          .eq('unit_id', unitId)
-          .eq('is_active', true)
-          .neq('role', 'superadmin')
-
-        filteredActiveEmpIds = unitEmps?.map(e => e.id) || []
-        assQuery = assQuery.in('employee_id', filteredActiveEmpIds)
+        assQuery = assQuery.eq('employee.unit_id', unitId)
       }
 
-      const totalDisplayEmployees = filteredActiveEmpIds.length
+      // Get count of employees being displayed and total units
+      const [empDisplayRes, totalUnitsRes] = await Promise.all([
+        (async () => {
+          let q = supabase
+            .from('m_employees')
+            .select('id', { count: 'exact', head: true })
+            .eq('is_active', true)
+            .neq('role', 'superadmin');
+          if (unitId && unitId !== 'all') q = q.eq('unit_id', unitId);
+          return q;
+        })(),
+        supabase
+          .from('m_units')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_active', true)
+          .neq('code', 'superadmin')
+      ]);
+
+      const totalDisplayEmployees = empDisplayRes.count || 0;
+      const totalUnits = totalUnitsRes.count || 0;
 
       const { data: assessments, error: assError } = await assQuery
       if (assError) throw assError
 
-      // Group assessments by employee for calculation
-      const empDataMap = new Map<string, { [key: string]: any[] }>()
-      for (const a of assessments || []) {
-        const empId = a.employee_id
-        if (!empDataMap.has(empId)) {
-          empDataMap.set(empId, { P1: [], P2: [], P3: [] })
-        }
+      const empDataMap = this.groupAssessmentsByEmployee(assessments || []);
+      const assessedEmployeeIds = Array.from(empDataMap.keys());
+      const totalAssessed = assessedEmployeeIds.length;
 
-        const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
-        const categoryObj = indicator?.m_kpi_categories
-        const catName = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
-
-        if (catName && empDataMap.get(empId)![catName]) {
-          empDataMap.get(empId)![catName].push(a)
-        }
-      }
-
-      const calculateScore = (empId: string) => {
-        const cats = empDataMap.get(empId)
-        if (!cats) return 0
-
-        let totalScore = 0
-        for (const catName of ['P1', 'P2', 'P3']) {
-          const catAssessments = cats[catName]
-          if (catAssessments.length === 0) continue
-
-          const firstAss: any = catAssessments[0]
-          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any
-          const categoryObj = indicator?.m_kpi_categories as any
-          const categoryWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
-
-          let totalRealisasi = 0
-          let totalTarget = 0
-          for (const a of catAssessments) {
-            const indWeight = parseFloat(a.weight_percentage) || 0
-            totalRealisasi += (parseFloat(a.realization_value) || 0) * (indWeight / 100)
-            totalTarget += (parseFloat(a.target_value) || 100) * (indWeight / 100)
-          }
-
-          if (totalTarget > 0) {
-            totalScore += (totalRealisasi / totalTarget) * categoryWeight
-          }
-        }
-        return totalScore
-      }
-
-      const assessedEmployeeIds = Array.from(empDataMap.keys())
-      const totalAssessed = assessedEmployeeIds.length
-
-      // Calculate average score - across only assessed employees for a true performance average
-      const assessedScores = assessedEmployeeIds.map(empId => calculateScore(empId))
+      // Calculate average score across assessed employees
+      const assessedScores = assessedEmployeeIds.map(empId => this.calculateScoreFromGroupedData(empDataMap.get(empId)!));
       const avgScore = totalAssessed > 0
         ? assessedScores.reduce((sum, score) => sum + score, 0) / totalAssessed
-        : 0
+        : 0;
 
       const completionRate = totalDisplayEmployees > 0
         ? (totalAssessed / totalDisplayEmployees) * 100
-        : 0
+        : 0;
 
       return {
         totalEmployees: totalDisplayEmployees,
-        totalUnits: totalUnits || 0,
+        totalUnits: totalUnits,
         avgScore: Math.round(avgScore * 100) / 100,
         completionRate: Math.round(completionRate * 10) / 10,
-        trends: {
-          employees: 0,
-          score: 0,
-          completion: 0
-        }
+        trends: { employees: 0, score: 0, completion: 0 }
       }
-    } catch (error) {
-      console.error('Error in getSuperadminStats:', error)
+    } catch (error: any) {
+      console.error('Error in getSuperadminStats:', error?.message || error)
       return this.getFallbackStats()
     }
   }
 
-  /**
-   * Fallback stats when queries fail
-   */
   private static getFallbackStats(): DashboardStats {
     return {
       totalEmployees: 0,
       totalUnits: 0,
       avgScore: 0,
       completionRate: 0,
-      trends: {
-        employees: 0,
-        score: 0,
-        completion: 0
-      }
+      trends: { employees: 0, score: 0, completion: 0 }
     }
   }
 
-  /**
-   * Get top performers - using direct queries with joins
-   */
   static async getTopPerformers(limit: number = 5, unitId?: string, period?: string, year?: string): Promise<TopPerformer[]> {
     const supabase = await createAdminClient()
 
     try {
       const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
 
-      // Get assessments for current period with employee and unit info
       let query = supabase
         .from('t_kpi_assessments')
         .select(`
@@ -271,8 +218,8 @@ export class DashboardService {
           weight_percentage,
           realization_value,
           target_value,
-          m_employees!t_kpi_assessments_employee_id_fkey (
-            id, full_name, is_active,
+          employee:m_employees!t_kpi_assessments_employee_id_fkey!inner (
+            id, full_name, is_active, role,
             unit_id,
             m_units!m_employees_unit_id_fkey ( name )
           ),
@@ -283,26 +230,21 @@ export class DashboardService {
             )
           )
         `)
-        .neq('m_employees.role', 'superadmin')
+        .eq('employee.is_active', true)
+        .neq('employee.role', 'superadmin')
         .in('period', resolvedPeriods)
 
-      if (unitId) {
-        const { data: emps } = await supabase.from('m_employees').select('id').eq('unit_id', unitId)
-        const empIds = emps?.map((e: any) => e.id) || []
-        query = query.in('employee_id', empIds)
+      if (unitId && unitId !== 'all') {
+        query = query.eq('employee.unit_id', unitId)
       }
 
       const { data: assessments, error } = await query
+      if (error) throw error
 
-      if (error) {
-        console.error('Error fetching top performers:', error.message)
-        return []
-      }
-
-      // Efficiently group assessments by employee and category in one pass
       const empDataMap = new Map<string, { info: any, cats: { [key: string]: any[] } }>()
       for (const a of (assessments || [])) {
-        const emp = a.m_employees as any
+        const employeeData = Array.isArray(a.employee) ? a.employee[0] : a.employee
+        const emp = employeeData as any
         if (!emp || !emp.is_active) continue
 
         const empId = emp.id
@@ -316,70 +258,39 @@ export class DashboardService {
           })
         }
 
-        const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
-        const categoryObj = indicator?.m_kpi_categories
-        const catName = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
+        const indicator = (Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators) as any;
+        const categoryObj = indicator?.m_kpi_categories;
+        const catName = (Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category) as string;
 
         if (catName && empDataMap.get(empId)!.cats[catName]) {
           empDataMap.get(empId)!.cats[catName].push(a)
         }
       }
 
-      // Calculate total score per employee
-      const employeeScores = Array.from(empDataMap.entries()).map(([empId, data]) => {
-        let totalScore = 0
-        for (const catName of ['P1', 'P2', 'P3']) {
-          const catAssessments = data.cats[catName]
-          if (catAssessments.length === 0) continue
+      const performers: TopPerformer[] = Array.from(empDataMap.entries()).map(([id, data]) => ({
+        id,
+        name: data.info.name,
+        unit: data.info.unit,
+        score: this.calculateScoreFromGroupedData(data.cats),
+        rank: 0
+      }))
 
-          const firstAss: any = catAssessments[0]
-          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any
-          const categoryObj = indicator?.m_kpi_categories as any
-          const categoryWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
-
-          let totalR = 0, totalT = 0
-          for (const a of catAssessments) {
-            const w = parseFloat((a as any).weight_percentage) || 0
-            totalR += (parseFloat((a as any).realization_value) || 0) * (w / 100)
-            totalT += (parseFloat((a as any).target_value) || 100) * (w / 100)
-          }
-          if (totalT > 0) totalScore += (totalR / totalT) * categoryWeight
-        }
-
-        return {
-          id: empId,
-          name: data.info.name,
-          unit: data.info.unit,
-          score: Math.round(totalScore * 100) / 100
-        }
-      })
-
-      // Sort and format for return
-      const sorted = employeeScores
+      return performers
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
-        .map((p, i) => ({
-          ...p,
-          rank: i + 1
-        }))
-
-      return sorted
-    } catch (error) {
-      console.error('Error in getTopPerformers:', error)
+        .map((p, i) => ({ ...p, rank: i + 1 }))
+    } catch (error: any) {
+      console.error('Error in getTopPerformers:', error?.message || error)
       return []
     }
   }
 
-  /**
-   * Get worst performers - using direct queries with joins
-   */
   static async getWorstPerformers(limit: number = 5, unitId?: string, period?: string, year?: string): Promise<TopPerformer[]> {
     const supabase = await createAdminClient()
 
     try {
       const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
 
-      // Get assessments for current period
       let query = supabase
         .from('t_kpi_assessments')
         .select(`
@@ -387,8 +298,8 @@ export class DashboardService {
           weight_percentage,
           realization_value,
           target_value,
-          m_employees!t_kpi_assessments_employee_id_fkey (
-            id, full_name, is_active,
+          employee:m_employees!t_kpi_assessments_employee_id_fkey!inner (
+            id, full_name, is_active, role,
             unit_id,
             m_units!m_employees_unit_id_fkey ( name )
           ),
@@ -399,26 +310,21 @@ export class DashboardService {
             )
           )
         `)
-        .neq('m_employees.role', 'superadmin')
+        .eq('employee.is_active', true)
+        .neq('employee.role', 'superadmin')
         .in('period', resolvedPeriods)
 
-      if (unitId) {
-        const { data: emps } = await supabase.from('m_employees').select('id').eq('unit_id', unitId)
-        const empIds = emps?.map((e: any) => e.id) || []
-        query = query.in('employee_id', empIds)
+      if (unitId && unitId !== 'all') {
+        query = query.eq('employee.unit_id', unitId)
       }
 
       const { data: assessments, error } = await query
+      if (error) throw error
 
-      if (error) {
-        console.error('Error fetching worst performers:', error.message)
-        return []
-      }
-
-      // Efficiently group assessments by employee and category in one pass
       const empDataMap = new Map<string, { info: any, cats: { [key: string]: any[] } }>()
       for (const a of (assessments || [])) {
-        const emp = a.m_employees as any
+        const employeeData = Array.isArray(a.employee) ? a.employee[0] : a.employee
+        const emp = employeeData as any
         if (!emp || !emp.is_active) continue
 
         const empId = emp.id
@@ -432,200 +338,141 @@ export class DashboardService {
           })
         }
 
-        const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
-        const categoryObj = indicator?.m_kpi_categories
-        const catName = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
+        const indicator = (Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators) as any;
+        const categoryObj = indicator?.m_kpi_categories;
+        const catName = (Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category) as string;
 
         if (catName && empDataMap.get(empId)!.cats[catName]) {
           empDataMap.get(empId)!.cats[catName].push(a)
         }
       }
 
-      // Calculate total score per employee
-      const employeeScores = Array.from(empDataMap.entries()).map(([empId, data]) => {
-        let totalScore = 0
-        for (const catName of ['P1', 'P2', 'P3']) {
-          const catAssessments = data.cats[catName]
-          if (catAssessments.length === 0) continue
+      const performers: TopPerformer[] = Array.from(empDataMap.entries()).map(([id, data]) => ({
+        id,
+        name: data.info.name,
+        unit: data.info.unit,
+        score: this.calculateScoreFromGroupedData(data.cats),
+        rank: 0
+      }))
 
-          const firstAss: any = catAssessments[0]
-          const indicator = (Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators) as any
-          const categoryObj = indicator?.m_kpi_categories as any
-          const categoryWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
-
-          let totalR = 0, totalT = 0
-          for (const a of catAssessments) {
-            const w = parseFloat((a as any).weight_percentage) || 0
-            totalR += (parseFloat((a as any).realization_value) || 0) * (w / 100)
-            totalT += (parseFloat((a as any).target_value) || 100) * (w / 100)
-          }
-          if (totalT > 0) totalScore += (totalR / totalT) * categoryWeight
-        }
-
-        return {
-          id: empId,
-          name: data.info.name,
-          unit: data.info.unit,
-          score: Math.round(totalScore * 100) / 100
-        }
-      })
-
-      // Sort and format for return (worst first)
-      const sorted = employeeScores
+      return performers
         .sort((a, b) => a.score - b.score)
         .slice(0, limit)
-        .map((p, i) => ({
-          ...p,
-          rank: i + 1
-        }))
-
-      return sorted
-    } catch (error) {
-      console.error('Error in getWorstPerformers:', error)
+        .map((p, i) => ({ ...p, rank: i + 1 }))
+    } catch (error: any) {
+      console.error('Error in getWorstPerformers:', error?.message || error)
       return []
     }
   }
+
   static async getUnitPerformance(period?: string, year?: string): Promise<UnitPerformance[]> {
     const supabase = await createAdminClient()
 
     try {
       const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
 
-      // Get all active units with their employees
-      const { data: units, error } = await supabase
-        .from('m_units')
-        .select(`
-          id, name,
-          m_employees!m_employees_unit_id_fkey ( id, is_active, role )
-        `)
-        .eq('is_active', true)
-        .neq('code', 'superadmin')
-        .order('name')
-
-      if (error) {
-        console.error('Error fetching units:', error.message)
-        return []
-      }
-
-      // Get all assessments for current period
-      const { data: assessments } = await supabase
+      const { data: assessments, error } = await supabase
         .from('t_kpi_assessments')
         .select(`
           employee_id,
-          weight_percentage,
           realization_value,
           target_value,
-          m_kpi_indicators!inner (
-            m_kpi_categories!inner (
+          weight_percentage,
+          employee:m_employees!t_kpi_assessments_employee_id_fkey!inner(
+            id, is_active, role, unit_id,
+            m_units!m_employees_unit_id_fkey(id, name)
+          ),
+          m_kpi_indicators (
+            m_kpi_categories (
               category,
               weight_percentage
             )
           )
         `)
         .in('period', resolvedPeriods)
+        .eq('employee.is_active', true)
+        .neq('employee.role', 'superadmin')
 
-      // Build a map of employee_id -> assessments
-      const employeeAssessedMap = new Map<string, any[]>()
-      for (const a of (assessments || [])) {
-        if (!employeeAssessedMap.has(a.employee_id)) {
-          employeeAssessedMap.set(a.employee_id, [])
-        }
-        employeeAssessedMap.get(a.employee_id)!.push(a)
-      }
+      if (error) throw error
 
-      const calcEmployeeTotalScore = (empId: string) => {
-        const empAssessments = employeeAssessedMap.get(empId) || []
-        if (empAssessments.length === 0) return 0
+      // Group by Unit
+      const unitDataMap = new Map<string, { name: string, employeeScores: Map<string, { [key: string]: any[] }>, totalDisplayEmps: number }>()
 
-        const calcCategoryScore = (categoryName: string) => {
-          const catAssessments = empAssessments.filter((a: any) => {
-            const indicator = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators;
-            const categoryData = indicator?.m_kpi_categories;
-            const catName = Array.isArray(categoryData) ? categoryData[0]?.category : categoryData?.category;
-            return catName === categoryName;
+      // 1. Get total display employees per unit
+      const { data: unitEmpsCount } = await supabase
+        .from('m_employees')
+        .select('unit_id, m_units(name)')
+        .eq('is_active', true)
+        .neq('role', 'superadmin')
+
+      for (const e of (unitEmpsCount || []) as any[]) {
+        if (!e.unit_id) continue
+        if (!unitDataMap.has(e.unit_id)) {
+          unitDataMap.set(e.unit_id, {
+            name: (e.m_units as any)?.name || 'Unknown',
+            employeeScores: new Map(),
+            totalDisplayEmps: 0
           })
-          if (catAssessments.length === 0) return 0
-
-          const firstAss = catAssessments[0];
-          const indicator = Array.isArray(firstAss.m_kpi_indicators) ? firstAss.m_kpi_indicators[0] : firstAss.m_kpi_indicators;
-          const categoryData = indicator?.m_kpi_categories;
-          const categoryWeight = parseFloat(Array.isArray(categoryData) ? categoryData[0]?.weight_percentage : categoryData?.weight_percentage) || 0
-
-          let totalRealisasi = 0
-          let totalTarget = 0
-          for (const a of catAssessments) {
-            const indWeight = parseFloat(a.weight_percentage) || 0
-            const indRealisasi = parseFloat(a.realization_value) || 0
-            const indTarget = parseFloat(a.target_value) || 100
-            totalRealisasi += indRealisasi * (indWeight / 100)
-            totalTarget += indTarget * (indWeight / 100)
-          }
-          if (totalTarget > 0) return (totalRealisasi / totalTarget) * categoryWeight
-          return 0
         }
-
-        return calcCategoryScore('P1') + calcCategoryScore('P2') + calcCategoryScore('P3')
+        unitDataMap.get(e.unit_id)!.totalDisplayEmps++
       }
 
-      return (units || []).map(unit => {
-        const employees = (unit.m_employees as any[]) || []
-        const activeEmployees = employees.filter((e: any) => e.is_active && e.role !== 'superadmin')
-        const employeeCount = activeEmployees.length
+      // 2. Map assessments to units and employees
+      for (const a of (assessments || []) as any[]) {
+        const unitId = (Array.isArray(a.employee) ? a.employee[0]?.unit_id : a.employee?.unit_id)
+        if (!unitId || !unitDataMap.has(unitId)) continue
 
-        // Calculate unit avg score from employee final scores
-        let totalScore = 0
-        let scoreCount = 0
-        for (const emp of activeEmployees) {
-          if (employeeAssessedMap.has(emp.id)) {
-            totalScore += calcEmployeeTotalScore(emp.id)
-            scoreCount += 1
-          }
+        const empId = a.employee_id
+        const unitGroup = unitDataMap.get(unitId)!
+        if (!unitGroup.employeeScores.has(empId)) {
+          unitGroup.employeeScores.set(empId, { P1: [], P2: [], P3: [] })
         }
-        const avgScore = scoreCount > 0 ? totalScore / scoreCount : 0
 
-        const status = avgScore >= 90 ? 'excellent' :
-          avgScore >= 80 ? 'good' :
-            avgScore >= 70 ? 'average' : 'poor'
+        const indicator = (Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators) as any;
+        const categoryObj = indicator?.m_kpi_categories;
+        const catName = (Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category) as string;
+
+        if (catName && unitGroup.employeeScores.get(empId)![catName]) {
+          unitGroup.employeeScores.get(empId)![catName].push(a)
+        }
+      }
+
+      return Array.from(unitDataMap.entries()).map(([id, data]) => {
+        const assessedScores = Array.from(data.employeeScores.values()).map(cats => this.calculateScoreFromGroupedData(cats));
+        const avgScore = assessedScores.length > 0
+          ? assessedScores.reduce((s, score) => s + score, 0) / assessedScores.length
+          : 0;
+
+        const completionRate = data.totalDisplayEmps > 0
+          ? (data.employeeScores.size / data.totalDisplayEmps) * 100
+          : 0;
 
         return {
-          id: unit.id,
-          name: unit.name,
-          employeeCount,
+          id,
+          name: data.name,
           avgScore: Math.round(avgScore * 100) / 100,
-          trend: 'stable' as const,
-          trendValue: 0,
-          status: status as 'excellent' | 'good' | 'average' | 'poor'
+          completionRate: Math.round(completionRate * 10) / 10,
+          employeeCount: data.totalDisplayEmps
         }
-      })
-    } catch (error) {
-      console.error('Error in getUnitPerformance:', error)
+      }).sort((a, b) => b.avgScore - a.avgScore)
+
+    } catch (error: any) {
+      console.error('Error in getUnitPerformance:', error?.message || error)
       return []
     }
   }
 
-  /**
-   * Get performance trend data
-   */
-  static async getPerformanceTrend(months: number = 6, unitId?: string, period?: string, year?: string): Promise<PerformanceData[]> {
+  static async getPerformanceTrend(months: number = 6, unitId?: string, period?: string, year?: string): Promise<PerformanceTrend[]> {
     const supabase = await createAdminClient()
 
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
-    const data: PerformanceData[] = []
-
-    const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
-    const lastPeriod = resolvedPeriods[resolvedPeriods.length - 1]
-    const currentYear = parseInt(lastPeriod.slice(0, 4))
-    const currentMonth = parseInt(lastPeriod.slice(5, 7)) - 1
-    const endDate = new Date(currentYear, currentMonth, 1)
-
-    // Fetch all assessments for the last 6 months in one query to optimize
-    const periods: string[] = []
-    for (let i = months - 1; i >= 0; i--) {
-      const date = new Date(endDate.getFullYear(), endDate.getMonth() - i, 1)
-      periods.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`)
-    }
-
     try {
+      const periods: string[] = []
+      const current = new Date()
+      for (let i = 0; i < months; i++) {
+        const d = new Date(current.getFullYear(), current.getMonth() - i, 1)
+        periods.unshift(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+      }
+
       let q = supabase
         .from('t_kpi_assessments')
         .select(`
@@ -634,6 +481,7 @@ export class DashboardService {
           realization_value,
           target_value,
           weight_percentage,
+          employee:m_employees!t_kpi_assessments_employee_id_fkey!inner(id, is_active, role, unit_id),
           m_kpi_indicators (
             m_kpi_categories (
               category,
@@ -642,111 +490,129 @@ export class DashboardService {
           )
         `)
         .in('period', periods)
+        .eq('employee.is_active', true)
+        .neq('employee.role', 'superadmin')
 
       if (unitId && unitId !== 'all') {
-        const { data: emps } = await supabase.from('m_employees').select('id').eq('unit_id', unitId)
-        const empIds = emps?.map((e: any) => e.id) || []
-        q = q.in('employee_id', empIds)
+        q = q.eq('employee.unit_id', unitId)
       }
 
       const { data: assessments, error } = await q
       if (error) throw error
 
-      // Process month-by-month
-      for (const periodStr of periods) {
-        const monthIndex = parseInt(periodStr.slice(5, 7)) - 1
-        const monthName = monthNames[monthIndex]
+      // Group by period then employee
+      return periods.map(p => {
+        const pAss = (assessments || []).filter(a => a.period === p)
+        const empMap = this.groupAssessmentsByEmployee(pAss)
 
-        const monthAss = (assessments || []).filter(a => a.period === periodStr)
-        const empIds = Array.from(new Set(monthAss.map(a => a.employee_id)))
+        const scores = Array.from(empMap.values()).map(cats => this.calculateScoreFromGroupedData(cats))
+        const avg = scores.length > 0 ? scores.reduce((s, score) => s + score, 0) / scores.length : 0
 
-        let p1Sum = 0, p2Sum = 0, p3Sum = 0, totalSum = 0
-        let empWithScoreCount = 0
-
-        for (const empId of empIds) {
-          const empAss = monthAss.filter(a => a.employee_id === empId)
-
-          const calcCatContribution = (catName: string) => {
-            const catAss = empAss.filter((a: any) => {
-              const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
-              const categoryObj = indicator?.m_kpi_categories
-              const cat = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
-              return cat === catName
-            })
-
-            if (catAss.length === 0) return 0
-
-            const first: any = catAss[0]
-            const indicator: any = Array.isArray(first.m_kpi_indicators) ? first.m_kpi_indicators[0] : first.m_kpi_indicators
-            const categoryObj = indicator?.m_kpi_categories
-            const catWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
-
-            let totalR = 0, totalT = 0
-            for (const a of catAss) {
-              const w = parseFloat((a as any).weight_percentage) || 0
-              totalR += (parseFloat((a as any).realization_value) || 0) * (w / 100)
-              totalT += (parseFloat((a as any).target_value) || 100) * (w / 100)
-            }
-
-            return totalT > 0 ? (totalR / totalT) * catWeight : 0
-          }
-
-          const empP1 = calcCatContribution('P1')
-          const empP2 = calcCatContribution('P2')
-          const empP3 = calcCatContribution('P3')
-
-          p1Sum += empP1
-          p2Sum += empP2
-          p3Sum += empP3
-          totalSum += (empP1 + empP2 + empP3)
-          empWithScoreCount++
+        return {
+          period: p,
+          score: Math.round(avg * 100) / 100
         }
-
-        data.push({
-          month: monthName,
-          p1: empWithScoreCount > 0 ? Math.round((p1Sum / empWithScoreCount) * 10) / 10 : 0,
-          p2: empWithScoreCount > 0 ? Math.round((p2Sum / empWithScoreCount) * 10) / 10 : 0,
-          p3: empWithScoreCount > 0 ? Math.round((p3Sum / empWithScoreCount) * 10) / 10 : 0,
-          total: empWithScoreCount > 0 ? Math.round((totalSum / empWithScoreCount) * 10) / 10 : 0
-        })
-      }
-      return data
+      })
     } catch (error: any) {
-      console.error('Error in getPerformanceTrend:', error)
+      console.error('Error in getPerformanceTrend:', error?.message || error)
       return []
     }
   }
 
-  /**
-   * Get recent activities
-   */
-  static async getRecentActivities(limit: number = 10): Promise<Activity[]> {
-    const supabase = await createClient()
+  static async getKPIDistribution(unitId?: string, period?: string, year?: string): Promise<KPIDistribution[]> {
+    const supabase = await createAdminClient()
 
     try {
-      const { data: audits, error } = await supabase
-        .from('t_audit_log')
-        .select('id, operation, table_name, details, timestamp')
-        .order('timestamp', { ascending: false })
-        .limit(limit)
+      const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
 
-      if (error) {
-        console.error('Error fetching audit logs:', error)
-        return []
+      let query = supabase
+        .from('t_kpi_assessments')
+        .select(`
+          employee_id,
+          realization_value,
+          target_value,
+          weight_percentage,
+          employee:m_employees!t_kpi_assessments_employee_id_fkey!inner(id, is_active, role, unit_id),
+          m_kpi_indicators (
+            m_kpi_categories (
+              category,
+              weight_percentage
+            )
+          )
+        `)
+        .in('period', resolvedPeriods)
+        .eq('employee.is_active', true)
+        .neq('employee.role', 'superadmin')
+
+      if (unitId && unitId !== 'all') {
+        query = query.eq('employee.unit_id', unitId)
       }
 
-      if (!audits || audits.length === 0) return []
+      const { data: assessments, error } = await query
+      if (error) throw error
 
-      return audits.map(audit => {
-        let type: Activity['type'] = 'info'
-        const operation = audit.operation?.toLowerCase() || ''
+      const empMap = this.groupAssessmentsByEmployee(assessments || [])
+      let p1Sum = 0, p2Sum = 0, p3Sum = 0
+      let empCount = 0
 
-        if (operation.includes('delete')) type = 'error'
-        else if (operation.includes('create') || operation.includes('insert')) type = 'success'
-        else if (operation.includes('update')) type = 'warning'
+      for (const cats of empMap.values()) {
+        const calcCat = (catName: string) => {
+          const catAss = cats[catName]
+          if (!catAss || catAss.length === 0) return 0
 
-        const tableName = audit.table_name || 'unknown'
-        const actionText = `${audit.operation} ${tableName.replace('t_', '').replace('m_', '')}`
+          const first = catAss[0]
+          const indicator = (Array.isArray(first.m_kpi_indicators) ? first.m_kpi_indicators[0] : first.m_kpi_indicators) as any;
+          const categoryObj = indicator?.m_kpi_categories as any;
+          const catWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0;
+
+          let totalR = 0, totalT = 0
+          for (const a of catAss) {
+            const w = parseFloat(a.weight_percentage) || 0
+            totalR += (parseFloat(a.realization_value) || 0) * (w / 100)
+            totalT += (parseFloat(a.target_value) || 100) * (w / 100)
+          }
+          return totalT > 0 ? (totalR / totalT) * catWeight : 0
+        }
+
+        p1Sum += calcCat('P1')
+        p2Sum += calcCat('P2')
+        p3Sum += calcCat('P3')
+        empCount++
+      }
+
+      return [
+        { name: 'P1 (Posisi)', value: empCount > 0 ? Math.round(p1Sum / empCount) : 0, color: '#3b82f6' },
+        { name: 'P2 (Kinerja)', value: empCount > 0 ? Math.round(p2Sum / empCount) : 0, color: '#10b981' },
+        { name: 'P3 (Potensi)', value: empCount > 0 ? Math.round(p3Sum / empCount) : 0, color: '#f59e0b' }
+      ]
+    } catch (error: any) {
+      console.error('Error in getKPIDistribution:', error?.message || error)
+      return [
+        { name: 'P1 (Posisi)', value: 0, color: '#3b82f6' },
+        { name: 'P2 (Kinerja)', value: 0, color: '#10b981' },
+        { name: 'P3 (Potensi)', value: 0, color: '#f59e0b' }
+      ]
+    }
+  }
+
+  static async getRecentActivities() {
+    const supabase = await createAdminClient()
+    try {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(10)
+
+      if (error) throw error
+      return (data || []).map(audit => {
+        const action = audit.action.toLowerCase()
+        let type: 'create' | 'update' | 'delete' = 'update'
+        if (action.includes('create') || action.includes('insert')) type = 'create'
+        if (action.includes('delete') || action.includes('remove')) type = 'delete'
+
+        const actionParts = audit.action.split(' ')
+        const actionText = actionParts.length > 1 ? actionParts.slice(0, 2).join(' ') : audit.action
 
         return {
           id: audit.id,
@@ -759,102 +625,6 @@ export class DashboardService {
     } catch (error) {
       console.error('Exception in getRecentActivities:', error)
       return []
-    }
-  }
-
-  /**
-   * Get KPI distribution data
-   */
-  static async getKPIDistribution(unitId?: string, period?: string, year?: string) {
-    const supabase = await createAdminClient()
-
-    try {
-      const resolvedPeriods = await this.getResolvedPeriods(supabase, period, year)
-
-      let query = supabase
-        .from('t_kpi_assessments')
-        .select(`
-          employee_id,
-          realization_value,
-          target_value,
-          weight_percentage,
-          m_kpi_indicators (
-            m_kpi_categories (
-              category,
-              weight_percentage
-            )
-          )
-        `)
-        .in('period', resolvedPeriods)
-
-      if (unitId) {
-        const { data: emps } = await supabase.from('m_employees').select('id').eq('unit_id', unitId)
-        const empIds = emps?.map((e: any) => e.id) || []
-        query = query.in('employee_id', empIds)
-      }
-
-      const { data: assessments, error } = await query
-      if (error) throw error
-
-      const empIds = Array.from(new Set((assessments || []).map(a => a.employee_id)))
-      let p1Sum = 0, p2Sum = 0, p3Sum = 0
-      let empCount = 0
-
-      // Efficiently group assessments by employee and category in one pass
-      const empDataMap = new Map<string, { [key: string]: any[] }>()
-      for (const a of (assessments || [])) {
-        const empId = a.employee_id
-        if (!empDataMap.has(empId)) {
-          empDataMap.set(empId, { P1: [], P2: [], P3: [] })
-        }
-
-        const indicator: any = Array.isArray(a.m_kpi_indicators) ? a.m_kpi_indicators[0] : a.m_kpi_indicators
-        const categoryObj = indicator?.m_kpi_categories
-        const catName = Array.isArray(categoryObj) ? categoryObj[0]?.category : categoryObj?.category
-
-        if (catName && empDataMap.get(empId)![catName]) {
-          empDataMap.get(empId)![catName].push(a)
-        }
-      }
-
-      for (const [empId, cats] of empDataMap.entries()) {
-        const calcCatContrib = (catName: string) => {
-          const catAss = cats[catName]
-          if (catAss.length === 0) return 0
-
-          const first = catAss[0]
-          const indicator = (Array.isArray(first.m_kpi_indicators) ? first.m_kpi_indicators[0] : first.m_kpi_indicators) as any
-          const categoryObj = indicator?.m_kpi_categories as any
-          const catWeight = parseFloat(Array.isArray(categoryObj) ? categoryObj[0]?.weight_percentage : categoryObj?.weight_percentage) || 0
-
-          let totalR = 0, totalT = 0
-          for (const a of catAss) {
-            const w = parseFloat((a as any).weight_percentage) || 0
-            totalR += (parseFloat((a as any).realization_value) || 0) * (w / 100)
-            totalT += (parseFloat((a as any).target_value) || 100) * (w / 100)
-          }
-
-          return totalT > 0 ? (totalR / totalT) * catWeight : 0
-        }
-
-        p1Sum += calcCatContrib('P1')
-        p2Sum += calcCatContrib('P2')
-        p3Sum += calcCatContrib('P3')
-        empCount++
-      }
-
-      return [
-        { name: 'P1 (Posisi)', value: empCount > 0 ? Math.round(p1Sum / empCount) : 0, color: '#3b82f6' },
-        { name: 'P2 (Kinerja)', value: empCount > 0 ? Math.round(p2Sum / empCount) : 0, color: '#10b981' },
-        { name: 'P3 (Potensi)', value: empCount > 0 ? Math.round(p3Sum / empCount) : 0, color: '#f59e0b' }
-      ]
-    } catch (error) {
-      console.error('Error in getKPIDistribution:', error)
-      return [
-        { name: 'P1 (Posisi)', value: 0, color: '#3b82f6' },
-        { name: 'P2 (Kinerja)', value: 0, color: '#10b981' },
-        { name: 'P3 (Potensi)', value: 0, color: '#f59e0b' }
-      ]
     }
   }
 }

@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
 export interface IndicatorFormData {
@@ -89,21 +89,49 @@ export async function createIndicator(formData: IndicatorFormData) {
 }
 
 export async function updateIndicator(id: string, formData: Partial<IndicatorFormData>) {
-    const supabase = await createClient()
-
     try {
-        const { data: { user }, error: userError } = await supabase.auth.getUser()
-        if (userError || !user) throw new Error('User tidak terautentikasi')
+        const supabase = await createClient()
+        const { data: { user } } = await supabase.auth.getUser()
 
+        if (!user) {
+            return { success: false, error: 'Unauthorized' }
+        }
+
+        // Get user role and unit
         const { data: employee } = await supabase
             .from('m_employees')
-            .select('role, is_active')
+            .select('role, is_active, unit_id')
             .eq('user_id', user.id)
             .single()
 
-        if (!employee || !employee.is_active) throw new Error('User tidak aktif')
+        if (!employee || !employee.is_active) {
+            return { success: false, error: 'Employee not found or inactive' }
+        }
 
-        const { data, error } = await supabase
+        const isSuperadmin = employee.role === 'superadmin' || user.email === 'mukhsinh@gmail.com'
+        const isManager = employee.role === 'unit_manager'
+
+        if (!isSuperadmin && !isManager) {
+            return { success: false, error: 'Permission denied' }
+        }
+
+        // Using admin client for authorized personnel to ensure write access
+        const adminSupabase = await createAdminClient()
+
+        // If manager, check if they own this indicator's unit
+        if (isManager && !isSuperadmin) {
+            const { data: indicator } = await adminSupabase
+                .from('m_kpi_indicators')
+                .select('category_id, m_kpi_categories!inner(unit_id)')
+                .eq('id', id)
+                .single()
+
+            if (!indicator || (indicator as any).m_kpi_categories.unit_id !== employee.unit_id) {
+                return { success: false, error: 'You only have permission to update indicators in your own unit' }
+            }
+        }
+
+        const { data, error } = await adminSupabase
             .from('m_kpi_indicators')
             .update({
                 name: formData.name,
@@ -111,7 +139,7 @@ export async function updateIndicator(id: string, formData: Partial<IndicatorFor
                 weight_percentage: formData.weight_percentage,
                 target_value: formData.target_value,
                 measurement_unit: formData.measurement_unit,
-                base_index_value: formData.base_index_value || 0,
+                base_index_value: formData.base_index_value !== undefined ? formData.base_index_value : 0,
                 calculation_method: formData.calculation_method,
                 measurement_type: formData.measurement_type,
                 unit_tariff: formData.unit_tariff || 0,
@@ -122,13 +150,16 @@ export async function updateIndicator(id: string, formData: Partial<IndicatorFor
             .select()
             .single()
 
-        if (error) throw error
+        if (error) {
+            console.error('Update indicator error:', error)
+            return { success: false, error: error.message }
+        }
 
         revalidatePath('/kpi-config')
         return { success: true, data }
     } catch (error: any) {
-        console.error('Error in updateIndicator:', error)
-        return { success: false, error: error.message }
+        console.error('Update indicator catch error:', error)
+        return { success: false, error: error.message || 'An unexpected error occurred' }
     }
 }
 

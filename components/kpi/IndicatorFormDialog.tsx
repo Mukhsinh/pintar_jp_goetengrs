@@ -132,10 +132,10 @@ export default function IndicatorFormDialog({
           { score: 80, label: 'Baik' },
           { score: 100, label: 'Sangat Baik' }
         ],
-        unit_tariff: '',
-        base_index_value: '',
-        service_types: [],
-        measurement_unit: ''
+        unit_tariff: indicator.unit_tariff?.toString() || '',
+        base_index_value: indicator.base_index_value?.toString() || '',
+        service_types: indicator.service_types || [],
+        measurement_unit: indicator.measurement_unit || ''
       })
       checkSubIndicators()
     } else {
@@ -297,7 +297,7 @@ export default function IndicatorFormDialog({
         weight_percentage: (category?.is_weighted === false || formData.calculation_method === 'priority') ? 0 : parseFloat(formData.weight_percentage),
         measurement_unit: null,
         description: formData.description.trim() || null,
-        base_index_value: (formData.calculation_method === 'priority' || category?.configuration_style === 'activity')
+        base_index_value: (formData.calculation_method === 'priority' || category?.configuration_style === 'activity' || (!category && (indicator as any)?.m_kpi_categories?.configuration_style === 'activity'))
           ? parseFloat(formData.indicator_base_value || '0')
           : (formData.base_index_value ? parseFloat(formData.base_index_value) : 0),
         calculation_method: formData.calculation_method,
@@ -429,7 +429,7 @@ export default function IndicatorFormDialog({
 
 
               {/* Weight Percentage */}
-              {!isMedicalUnit && category?.is_weighted !== false && formData.calculation_method === 'indexing' && (
+              {(category?.is_weighted !== false && (indicator ? (indicator as any).m_kpi_categories?.is_weighted !== false : true)) && formData.calculation_method === 'indexing' && (
                 <div className="space-y-2">
                   <Label htmlFor="weight_percentage">
                     {category?.configuration_style === 'activity' ? 'Poin Indeks (%) *' : 'Persentase Bobot (%) *'}
@@ -462,26 +462,28 @@ export default function IndicatorFormDialog({
               )}
 
               {/* Basic Index Value (Activity or Priority) */}
-              {(category?.configuration_style === 'activity' || formData.calculation_method === 'priority') && (
-                <div className="space-y-2">
-                  <Label htmlFor="indicator_base_value">Tarif Dasar / Nilai Rupiah *</Label>
-                  <Input
-                    id="indicator_base_value"
-                    type="number"
-                    step="0.0001"
-                    min="0"
-                    value={formData.indicator_base_value}
-                    onChange={(e) => setFormData({ ...formData, indicator_base_value: e.target.value })}
-                    placeholder="contoh: 0.1250"
-                  />
-                  {errors.indicator_base_value && (
-                    <p className="text-sm text-red-600">{errors.indicator_base_value}</p>
-                  )}
-                  <p className="text-xs text-gray-500">
-                    Nilai tarif pengali atau nilai rupiah langsung. Digunakan untuk metode Berbasis Aktivitas atau Priority.
-                  </p>
-                </div>
-              )}
+              {(category?.configuration_style === 'activity' ||
+                formData.calculation_method === 'priority' ||
+                (indicator && (indicator as any).m_kpi_categories?.configuration_style === 'activity')) && (
+                  <div className="space-y-2">
+                    <Label htmlFor="indicator_base_value">Tarif Dasar / Nilai Rupiah *</Label>
+                    <Input
+                      id="indicator_base_value"
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      value={formData.indicator_base_value}
+                      onChange={(e) => setFormData({ ...formData, indicator_base_value: e.target.value })}
+                      placeholder="contoh: 0.1250"
+                    />
+                    {errors.indicator_base_value && (
+                      <p className="text-sm text-red-600">{errors.indicator_base_value}</p>
+                    )}
+                    <p className="text-xs text-gray-500">
+                      Nilai tarif pengali atau nilai rupiah langsung. Digunakan untuk metode Berbasis Aktivitas atau Priority.
+                    </p>
+                  </div>
+                )}
 
               {/* INTEGRATED SUB-INDICATOR FIELDS (Shown only if hasSubIndicators is false) */}
               {!hasSubIndicators && (

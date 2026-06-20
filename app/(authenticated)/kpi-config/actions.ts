@@ -63,7 +63,7 @@ export async function getKPIStructure(unitId: string) {
                 .from('m_kpi_indicators')
                 .select(`
           *,
-          m_kpi_categories!m_kpi_indicators_category_id_fkey!inner (unit_id)
+          m_kpi_categories!m_kpi_indicators_category_id_fkey!inner (unit_id, configuration_style, is_weighted)
         `)
                 .eq('m_kpi_categories.unit_id', unitId)
                 .order('code'),

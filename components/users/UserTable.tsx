@@ -6,6 +6,14 @@ import { deactivateUser } from '@/lib/services/user-management.service'
 import { Button } from '@/components/ui/button'
 import { Edit, Ban, CheckCircle, Trash2, User, ShieldCheck, Mail, Briefcase, MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 interface UserTableProps {
   users: UserWithPegawai[]
@@ -85,125 +93,120 @@ export function UserTable({ users, loading, onEdit, onDelete, onRefresh }: UserT
         <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent animate-shimmer" />
       )}
       <div className="overflow-x-auto scrollbar-thin">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="bg-slate-50/80 border-b border-slate-100">
-              <th className="text-left p-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Identitas Pegawai</th>
-              <th className="text-left p-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Akses &amp; Kontak</th>
-              <th className="text-left p-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Peran</th>
-              <th className="text-left p-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Status</th>
-              <th className="text-right p-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Opsi Manajemen</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
+        <Table className="w-full border-collapse">
+          <TableHeader>
+            <TableRow className="bg-slate-50/80 border-b border-slate-100">
+              <TableHead className="font-normal text-xs uppercase tracking-wider py-4">Identitas Pegawai</TableHead>
+              <TableHead className="font-normal text-xs uppercase tracking-wider">Unit Kerja</TableHead>
+              <TableHead className="font-normal text-xs uppercase tracking-wider">Kode Unit</TableHead>
+              <TableHead className="font-normal text-xs uppercase tracking-wider">Akses & Kontak</TableHead>
+              <TableHead className="font-normal text-xs uppercase tracking-wider">Peran</TableHead>
+              <TableHead className="font-normal text-xs uppercase tracking-wider">Status</TableHead>
+              <TableHead className="font-normal text-xs uppercase tracking-wider text-right pr-6">Opsi Management</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody className="divide-y divide-slate-50">
             {users.map((user) => {
               const style = roleStyles[user.role] || roleStyles.employee
               const RoleIcon = style.icon
 
               return (
-                <tr
+                <TableRow
                   key={user.id}
                   className="group hover:bg-blue-50/30 transition-all duration-300"
                 >
-                  <td className="p-6">
+                  <TableCell className="p-6">
                     <div className="flex items-center gap-4">
                       <div className={cn(
-                        "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border transition-transform group-hover:scale-110 duration-500",
+                        "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border transition-transform group-hover:scale-110 duration-500",
                         style.bg
                       )}>
-                        <RoleIcon className={cn("h-6 w-6", style.text)} />
+                        <RoleIcon className={cn("h-5 w-5", style.text)} />
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-base font-black text-slate-800 tracking-tight truncate">
-                          {user.pegawai?.full_name || 'Tidak Terhubung'}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded-md">
-                            {user.pegawai?.employee_code || '---'}
-                          </span>
-                          <span className="text-[10px] font-bold text-slate-400 tracking-tight truncate max-w-[150px]">
-                            {user.unit?.name || 'Unit Belum Diset'}
-                          </span>
-                        </div>
-                      </div>
+                      <p className="text-sm font-normal text-slate-800 tracking-tight">
+                        {user.pegawai?.full_name || 'Tidak Terhubung'}
+                      </p>
                     </div>
-                  </td>
-                  <td className="p-6">
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center gap-2 text-slate-600">
-                        <Mail size={12} className="text-slate-300" />
-                        <span className="text-sm font-bold tracking-tight">{user.email}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-slate-400">
-                        <CheckCircle size={12} className="text-slate-300" />
-                        <span className="text-[10px] font-bold uppercase tracking-widest">Dibuat: {new Date(user.created_at).toLocaleDateString('id-ID')}</span>
-                      </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="font-normal text-sm text-gray-900">
+                      {user.unit?.name || '-'}
                     </div>
-                  </td>
-                  <td className="p-6">
+                  </TableCell>
+                  <TableCell>
+                    <div className="font-normal text-xs text-gray-500 font-mono">
+                      {user.unit?.code || '-'}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <span className="font-medium text-sm text-gray-900 group-hover:text-blue-600 transition-colors">
+                        {user.email || '-'}
+                      </span>
+                      <span className="font-normal text-[10px] text-gray-500 mt-0.5">
+                        NIK: {user.pegawai?.employee_code || '-'}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
                     <div className={cn(
-                      "inline-flex items-center px-3 py-1.5 rounded-xl border text-[11px] font-black uppercase tracking-widest gap-2 shadow-sm",
+                      "inline-flex items-center px-2.5 py-1 rounded-lg border text-[10px] font-medium uppercase tracking-wider gap-1.5 shadow-sm w-fit",
                       style.bg, style.text
                     )}>
-                      <RoleIcon size={14} />
+                      <RoleIcon size={12} />
                       {style.label}
                     </div>
-                  </td>
-                  <td className="p-6">
+                  </TableCell>
+                  <TableCell>
                     {user.is_active ? (
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-100/50 text-emerald-600 font-black text-[10px] uppercase tracking-widest shadow-sm w-fit">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
+                      <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-100/50 text-emerald-600 font-medium text-[10px] uppercase tracking-wider shadow-sm w-fit">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                         Aktif
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-100/50 text-rose-500 font-black text-[10px] uppercase tracking-widest shadow-sm w-fit">
+                      <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-100/50 text-rose-500 font-medium text-[10px] uppercase tracking-wider shadow-sm w-fit">
                         <div className="w-1.5 h-1.5 rounded-full bg-rose-400" />
                         Nonaktif
                       </div>
                     )}
-                  </td>
-                  <td className="p-6">
-                    <div className="flex items-center justify-end gap-2 opacity-40 group-hover:opacity-100 transition-opacity">
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
                       <Button
                         size="icon"
                         variant="ghost"
                         onClick={() => onEdit(user)}
-                        className="h-10 w-10 rounded-xl hover:bg-white hover:shadow-md transition-all text-slate-400 hover:text-blue-600"
-                        title="Edit Akses"
+                        className="h-8 w-8 rounded-lg hover:bg-white hover:shadow-sm transition-all text-slate-400 hover:text-blue-600"
                       >
-                        <Edit className="h-5 w-5" />
+                        <Edit className="h-4 w-4" />
                       </Button>
-
                       {user.is_active && (
                         <Button
                           size="icon"
                           variant="ghost"
                           onClick={() => handleDeactivate(user)}
                           disabled={actionLoading === user.id}
-                          className="h-10 w-10 rounded-xl hover:bg-white hover:shadow-md transition-all text-slate-400 hover:text-amber-600"
-                          title="Nonaktifkan"
+                          className="h-8 w-8 rounded-lg hover:bg-white hover:shadow-sm transition-all text-slate-400 hover:text-amber-600"
                         >
-                          <Ban className="h-5 w-5" />
+                          <Ban className="h-4 w-4" />
                         </Button>
                       )}
-
                       <Button
                         size="icon"
                         variant="ghost"
                         onClick={() => onDelete(user)}
                         disabled={actionLoading === user.id}
-                        className="h-10 w-10 rounded-xl hover:bg-rose-50 hover:shadow-md transition-all text-slate-300 hover:text-rose-600"
-                        title="Hapus Permanen"
+                        className="h-8 w-8 rounded-lg hover:bg-rose-50 hover:shadow-sm transition-all text-slate-300 hover:text-rose-600"
                       >
-                        <Trash2 className="h-5 w-5" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               )
             })}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   )

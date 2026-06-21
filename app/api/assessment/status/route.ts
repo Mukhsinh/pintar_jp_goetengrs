@@ -148,6 +148,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const employeeId = searchParams.get('employee_id')
     const period = searchParams.get('period')
+    const requestedUnitId = searchParams.get('unit_id')
 
     if (!period) {
       return NextResponse.json({ error: 'Period is required' }, { status: 400 })
@@ -180,8 +181,14 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({ status: employeeStatus })
     } else {
-      // Get status for all employees based on role
-      const unitIdFilter = effectiveRole === 'unit_manager' ? effectiveUnitId : null
+      // Get status matching unit filter
+      let unitIdFilter = effectiveRole === 'unit_manager' ? effectiveUnitId : null
+
+      // Allow superadmin to override unit filter via query param
+      if (effectiveRole === 'superadmin' && requestedUnitId && requestedUnitId !== 'all') {
+        unitIdFilter = requestedUnitId
+      }
+
       const statuses = await getAssessmentStatus(fetchClient, unitIdFilter, period)
 
       // Calculate summary statistics

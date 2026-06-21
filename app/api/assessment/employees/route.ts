@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const period = searchParams.get('period')
     const status = searchParams.get('status')
+    const requestedUnitId = searchParams.get('unit_id')
 
     if (!period) {
       return NextResponse.json({ error: 'Period is required' }, { status: 400 })
@@ -79,14 +80,30 @@ export async function GET(request: NextRequest) {
       .select('*')
       .eq('period', period)
 
-    // STUCT UNIT ISOLATION: 
-    // Always filter by unit_id if the user is a unit_manager, 
-    // even if they have superadmin metadata in Auth (m_employees record takes precedence).
-    if (currentEmployee.role === 'unit_manager') {
-      if (!currentEmployee.unit_id) {
+    // STUCT UNIT ISOLATION & FILTERING
+    const userRole = currentEmployee.role
+    const userUnitId = currentEmployee.unit_id
+
+    if (userRole === 'unit_manager') {
+      // Unit managers are STRICTLY limited to their own unit
+      if (!userUnitId) {
         return NextResponse.json({ error: 'Unit ID not found for manager profile' }, { status: 403 })
       }
-      statusQuery = statusQuery.eq('unit_id', currentEmployee.unit_id)
+      statusQuery = statusQuery.eq('unit_id', userUnitId)
+    } else if (userRole === 'superadmin') {
+      // Superadmins can see all or filter by requested unit
+      if (requestedUnitId && requestedUnitId !== 'all') {
+        statusQuery = statusQuery.eq('unit_id', requestedUnitId)
+      }
+    } else {
+      // Employees or other roles should also be limited to their own unit if they somehow access this
+      // Or we can just reject if not superadmin/manager
+      if (userUnitId && userUnitId !== '0') {
+        statusQuery = statusQuery.eq('unit_id', userUnitId)
+      } else if (userRole !== 'superadmin') {
+        // Fallback safety: if role is unknown and unit is unknown, limit to nothing or error
+        return NextResponse.json({ error: 'Unauthorized access level' }, { status: 403 })
+      }
     }
 
     if (status && ['Belum Dinilai', 'Sebagian', 'Selesai'].includes(status)) {
@@ -100,14 +117,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: statusError.message }, { status: 500 })
     }
 
-    // Secondary filter: Ensure superadmins are not in the list for unit managers
+    // Secondary filter: Ensure superadmins are not in the list for anyone (view already does this but double check)
     // and that the unit isolation held (double check)
     const filteredResults = (rawEmployees || []).filter((emp: any) => {
       // Hide superadmins
       if (emp.role === 'superadmin') return false
 
       // Double check unit isolation for unit managers
-      if (currentEmployee.role === 'unit_manager' && emp.unit_id !== currentEmployee.unit_id) {
+      if (userRole === 'unit_manager' && emp.unit_id !== userUnitId) {
         return false
       }
 

@@ -165,6 +165,55 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 1. Prerequisite Check: Data Pool
+    const { data: poolExists, error: poolCheckError } = await supabase
+      .from('t_pool')
+      .select('id')
+      .eq('period', period)
+      .maybeSingle()
+
+    if (!poolExists) {
+      return NextResponse.json({
+        success: false,
+        error: `Data Pool tidak ditemukan untuk periode ${period}. Laporan tidak dapat dibuat tanpa konfigurasi Pool.`
+      }, { status: 400 })
+    }
+
+    // 2. Prerequisite Check: Data Penilaian (KPI)
+    // We check if at least one assessment exists for this period
+    let assessmentQuery = supabase
+      .from('t_kpi_assessments')
+      .select('id')
+      .eq('period', period)
+      .limit(1)
+
+    if (unitId && unitId !== 'all') {
+      // If a unit is specified, we check if there are assessments for employees in that unit
+      const { data: unitEmps } = await supabase
+        .from('m_employees')
+        .select('id')
+        .eq('unit_id', unitId)
+
+      const empIds = unitEmps?.map(e => e.id) || []
+      if (empIds.length > 0) {
+        assessmentQuery = assessmentQuery.in('employee_id', empIds)
+      } else {
+        return NextResponse.json({
+          success: false,
+          error: `Tidak ada data karyawan di unit yang dipilih untuk periode ${period}.`
+        }, { status: 400 })
+      }
+    }
+
+    const { data: assessmentExists, error: assCheckError } = await assessmentQuery.maybeSingle()
+
+    if (!assessmentExists) {
+      return NextResponse.json({
+        success: false,
+        error: `Data Penilaian belum diisi untuk periode ${period}. Laporan tidak dapat digenerate jika data penilaian kosong.`
+      }, { status: 400 })
+    }
+
     let data: any[] = []
 
     switch (reportType) {

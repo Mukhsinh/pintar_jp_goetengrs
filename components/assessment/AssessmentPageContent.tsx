@@ -36,6 +36,7 @@ export default function AssessmentPageContent({
   const [searchTerm, setSearchTerm] = useState('')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [availableUnits, setAvailableUnits] = useState<{ id: string, name: string }[]>([])
   const [unitFilter, setUnitFilter] = useState<string>(
     currentEmployee.role === 'unit_manager' ? currentEmployee.unit_id : 'all'
   )
@@ -66,6 +67,27 @@ export default function AssessmentPageContent({
     }
   }
 
+  // Load available units from API
+  const loadUnits = async () => {
+    try {
+      const response = await fetch('/api/assessment/reports?action=units')
+      const data = await response.json()
+      if (data.success && data.units) {
+        setAvailableUnits(data.units)
+
+        // If superadmin but has a unit_id, default to their unit if filter is currently 'all'
+        if (currentEmployee.role === 'superadmin' &&
+          currentEmployee.unit_id &&
+          currentEmployee.unit_id !== '0' &&
+          unitFilter === 'all') {
+          setUnitFilter(currentEmployee.unit_id)
+        }
+      }
+    } catch (error) {
+      console.error('Error loading units:', error)
+    }
+  }
+
   // Load employees for assessment
   const loadEmployees = async () => {
     if (!selectedPeriod) return
@@ -74,7 +96,8 @@ export default function AssessmentPageContent({
     setError(null)
 
     try {
-      const response = await fetch(`/api/assessment/employees?period=${selectedPeriod}`)
+      const unitParam = unitFilter !== 'all' ? `&unit_id=${unitFilter}` : ''
+      const response = await fetch(`/api/assessment/employees?period=${selectedPeriod}${unitParam}`)
       if (response.ok) {
         const data = await response.json()
         setEmployees(data.employees || [])
@@ -97,7 +120,8 @@ export default function AssessmentPageContent({
     if (!selectedPeriod) return
 
     try {
-      const response = await fetch(`/api/assessment/status?period=${selectedPeriod}`)
+      const unitParam = unitFilter !== 'all' ? `&unit_id=${unitFilter}` : ''
+      const response = await fetch(`/api/assessment/status?period=${selectedPeriod}${unitParam}`)
       if (response.ok) {
         const data = await response.json()
         setSummary(data.summary || {
@@ -143,13 +167,18 @@ export default function AssessmentPageContent({
     setFilteredEmployees(filtered)
   }, [employees, debouncedSearchTerm, statusFilter, unitFilter])
 
-  // Load data when period changes
+  // Load all initial data
+  useEffect(() => {
+    loadUnits()
+  }, [])
+
+  // Load data when period or unit filter changes
   useEffect(() => {
     if (selectedPeriod && selectedPeriod !== 'null' && selectedPeriod !== 'undefined') {
       loadEmployees()
       loadSummary()
     }
-  }, [selectedPeriod])
+  }, [selectedPeriod, unitFilter])
 
   // Handle refresh
   const handleRefresh = () => {
@@ -368,19 +397,41 @@ export default function AssessmentPageContent({
                     className="pl-10"
                   />
                 </div>
-                <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4 text-gray-400" />
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua Status</SelectItem>
-                      <SelectItem value="Belum Dinilai">Belum Dinilai</SelectItem>
-                      <SelectItem value="Sebagian">Sebagian</SelectItem>
-                      <SelectItem value="Selesai">Selesai</SelectItem>
-                    </SelectContent>
-                  </Select>
+
+                <div className="flex flex-wrap items-center gap-4">
+                  {/* Unit Filter - Only for Superadmin */}
+                  {currentEmployee.role === 'superadmin' && (
+                    <div className="flex items-center gap-2">
+                      <Filter className="h-4 w-4 text-gray-400" />
+                      <Select value={unitFilter} onValueChange={setUnitFilter}>
+                        <SelectTrigger className="w-64">
+                          <SelectValue placeholder="Pilih Unit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Semua Unit</SelectItem>
+                          {availableUnits.map(unit => (
+                            <SelectItem key={unit.id} value={unit.id}>
+                              {unit.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-48">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Semua Status</SelectItem>
+                        <SelectItem value="Belum Dinilai">Belum Dinilai</SelectItem>
+                        <SelectItem value="Sebagian">Sebagian</SelectItem>
+                        <SelectItem value="Selesai">Selesai</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
 
@@ -398,12 +449,47 @@ export default function AssessmentPageContent({
               </div>
 
               {/* Employee Table */}
-              <AssessmentTable
-                employees={filteredEmployees}
-                period={selectedPeriod}
-                loading={loading}
-                onAssessmentComplete={handleAssessmentComplete}
-              />
+              {loading ? (
+                <div className="flex flex-col items-center justify-center p-12 text-gray-500">
+                  <Loader2 className="h-8 w-8 animate-spin mb-4" />
+                  <p>Memuat data pegawai...</p>
+                </div>
+              ) : filteredEmployees.length > 0 ? (
+                <AssessmentTable
+                  employees={filteredEmployees}
+                  period={selectedPeriod}
+                  loading={loading}
+                  onAssessmentComplete={handleAssessmentComplete}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-gray-200 rounded-lg">
+                  <div className="bg-yellow-50 p-3 rounded-full mb-4">
+                    <AlertCircle className="h-8 w-8 text-yellow-600" />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    {searchTerm || unitFilter !== 'all' || statusFilter !== 'all'
+                      ? 'Tidak ada pegawai yang sesuai dengan filter'
+                      : `Tidak ada data untuk periode ${selectedPeriod}`}
+                  </h3>
+                  <p className="text-sm text-gray-500 max-w-md mx-auto mb-6">
+                    {searchTerm || unitFilter !== 'all' || statusFilter !== 'all'
+                      ? 'Coba ubah kata kunci pencarian atau reset filter untuk melihat data lainnya.'
+                      : `Daftar pegawai tidak muncul? Pastikan periode ${selectedPeriod} sudah dikonfigurasi di menu Pengaturan Pool dan karyawan sudah terdaftar di unit yang dipilih.`}
+                  </p>
+                  {(searchTerm || unitFilter !== 'all' || statusFilter !== 'all') && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setSearchTerm('');
+                        setUnitFilter(currentEmployee.role === 'unit_manager' ? currentEmployee.unit_id : 'all');
+                        setStatusFilter('all');
+                      }}
+                    >
+                      Reset Filter
+                    </Button>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

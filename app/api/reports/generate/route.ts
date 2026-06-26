@@ -302,22 +302,28 @@ export async function POST(request: NextRequest) {
       console.log(`[Summary] Found ${totalEmployeesInUnit} candidate employees for unit ${effectiveUnitId}`)
 
       if (totalEmployeesInUnit > 0) {
-        // Use batched query to handle large units without URL overflow
-        try {
-          const assessedEmps = await batchedIn(
-            supabase,
-            't_kpi_assessments',
-            'employee_id',
-            'employee_id',
-            unitEmpIds,
-            q => q.eq('period', period)
-          )
+        // Optimization: If it's an incentive report, we already have the count of assessed employees in 'data'
+        if (reportType === 'incentive' || reportType === 'employee-slip') {
+          assessedCount = data.length
+          console.log(`[Summary] Period ${period}: Using data length ${assessedCount} as assessed count`)
+        } else {
+          // Use batched query to handle large units without URL overflow for other report types
+          try {
+            const assessedEmps = await batchedIn(
+              supabase,
+              't_kpi_assessments',
+              'employee_id',
+              'employee_id',
+              unitEmpIds,
+              q => q.eq('period', period)
+            )
 
-          const uniqueAssessedIds = new Set((assessedEmps || []).map((a: any) => a.employee_id))
-          assessedCount = uniqueAssessedIds.size
-          console.log(`[Summary] Period ${period}: Found ${assessedCount} unique assessed employees out of ${totalEmployeesInUnit}`)
-        } catch (assessErr) {
-          console.error('[Summary] Error fetching assessments:', assessErr)
+            const uniqueAssessedIds = new Set((assessedEmps || []).map((a: any) => a.employee_id))
+            assessedCount = uniqueAssessedIds.size
+            console.log(`[Summary] Period ${period}: Found ${assessedCount} unique assessed employees out of ${totalEmployeesInUnit}`)
+          } catch (assessErr) {
+            console.error('[Summary] Error fetching assessments:', assessErr)
+          }
         }
       } else {
         assessedCount = 0
@@ -526,9 +532,43 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
 
   if (!allEmployees) return []
 
+  // --- First pass: calculate ALL employee scores and unit totals ---
+  const assessmentsByEmployee = new Map<string, any[]>()
+  for (const a of allAssessments) {
+    if (!assessmentsByEmployee.has(a.employee_id)) {
+      assessmentsByEmployee.set(a.employee_id, [])
+    }
+    assessmentsByEmployee.get(a.employee_id)!.push(a)
+  }
+
+  // Optimization: Pre-fetch doctor master data for the whole period to avoid inner-loop DB calls
+  const { data: periodRow } = await supabase
+    .from('remunerasi_periode')
+    .select('id')
+    .eq('periode', period)
+    .maybeSingle()
+
+  const periodUuid = periodRow?.id
+  const doctorMasterMap = new Map<string, any>()
+  let totalMasterDocs: any[] = []
+
+  if (periodUuid) {
+    totalMasterDocs = await batchedIn(
+      supabase,
+      'remunerasi_master_dokter',
+      'employee_id, pagu_guarantee_fee',
+      'employee_id',
+      empIds,
+      q => q.eq('periode_id', periodUuid)
+    )
+    for (const dm of totalMasterDocs) {
+      doctorMasterMap.set(dm.employee_id, dm)
+    }
+  }
+
   // --- Helper: Calculate total score/activity for an employee ---
   const calcEmployeeTotalScore = (empId: string, isMedicalUnit: boolean) => {
-    const empAssessments = allAssessments?.filter((a: any) => a.employee_id === empId) || []
+    const empAssessments = assessmentsByEmployee.get(empId) || []
     let totalActivityRupiah = 0
     const assessmentDetails: any[] = []
     const processedIndices = new Set<string>()
@@ -713,12 +753,7 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
 
     if (isMedical) {
       // MEDIS Style PIR Calculation: (Allocated - Aggregate Guarantee Fees - Total Activity Value) / Total Index Points
-      const { data: masterDocs } = await supabase
-        .from('remunerasi_master_dokter')
-        .select('pagu_guarantee_fee')
-      // Ideally we filter by employees in this unit
-
-      const totalGuaranteeFee = masterDocs?.reduce((acc: number, d: any) => acc + Number(d.pagu_guarantee_fee), 0) || 0
+      const totalGuaranteeFee = totalMasterDocs?.reduce((acc: number, d: any) => acc + Number(d.pagu_guarantee_fee), 0) || 0
       const sisaPaguMedis = allocatedForUnit - totalGuaranteeFee - totalActivityValueUnit
 
       // If sum of deductions exceeds allocated pool, standard handling
@@ -790,13 +825,7 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
     let guaranteeFee = 0
     if (isMedical) {
       // For doctors, also add Guarantee Fee
-      const { data: doctorMaster } = await supabase
-        .from('remunerasi_master_dokter')
-        .select('pagu_guarantee_fee')
-        .eq('employee_id', empId)
-        .eq('periode_id', period)
-        .maybeSingle()
-
+      const doctorMaster = doctorMasterMap.get(empId)
       guaranteeFee = Number(doctorMaster?.pagu_guarantee_fee || 0)
       grossIncentive += guaranteeFee
     }
@@ -821,10 +850,9 @@ async function generateIncentiveReport(supabase: any, period: string, unitId?: s
 
     // Extract category weights from assessmentDetails
     const getCatWeight = (cat: string) => {
-      const detail = assessmentDetails.find((d: any) => d.category === cat)
-      if (!detail) return 0
-      // Get from the category metadata in allAssessments
-      const catAss = allAssessments?.find((a: any) => a.employee_id === empId && a.m_kpi_indicators?.m_kpi_categories?.category === cat)
+      // Optimization: use grouped empAssessments for faster lookup
+      const empAssessments = assessmentsByEmployee.get(empId) || []
+      const catAss = empAssessments.find((a: any) => a.m_kpi_indicators?.m_kpi_categories?.category === cat)
       return parseFloat(catAss?.m_kpi_indicators?.m_kpi_categories?.weight_percentage) || 0
     }
 
